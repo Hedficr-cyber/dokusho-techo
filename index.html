@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- セキュリティ：このアプリが読み込んでよい先を限る（コンテンツセキュリティポリシー）。
+     スクリプトはこのサイトと、バーコード読み取り部品（版とファイルを固定）だけ。外部への通信は国立国会図書館だけ。
+     画像は表紙の配信元だけ。埋め込み・プラグイン・よそへのフォーム送信は使わない。配信元を足すときはここも直す -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://img.hanmoto.com https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://ndlsearch.ndl.go.jp; media-src 'self' blob: mediastream:; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'">
+<!-- 外部サイトへ、どのページから来たかを伝えない -->
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>読書手帖</title>
+<meta name="description" content="読書記録・本棚整理・作家と書名からの本探し">
+<meta name="theme-color" content="#F5F5F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161618" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="読書手帖">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#view">本文へ移動</a>
+  <header class="topbar">
+    <div class="topbar-in"><a class="brand" href="#shelf"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="0" y="0" width="32" height="32" rx="7" fill="currentColor"/><path d="M9 7.5h14v17H9zM12 7.5v17" fill="none" stroke="var(--paper)" stroke-width="1.3"/><path d="M17 7.5v8l2-1.5 2 1.5v-8" fill="var(--paper)"/></svg>読書手帖</a><span id="view-title" class="sr-only">本棚</span>
+      <button id="fab" class="fab" type="button" data-act="add" aria-label="本を追加"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>本を追加</span></button>
+    </div>
+  </header>
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="画面の切り替え">
+    <a class="tab" data-tab="shelf" href="#shelf">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h3v16H4zM9 4h3v16H9zM14.2 5.1l2.9-.8 3.6 15.4-2.9.7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+      <span>本棚</span>
+    </a>
+    <a class="tab" data-tab="author" href="#author">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 20c.8-3.8 3.4-5.8 6.5-5.8 1.4 0 2.6.4 3.6 1.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17" cy="16.5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m19 18.5 2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span>作家</span>
+      <span id="badge-author" class="badge" hidden></span>
+    </a>
+    <a class="tab" data-tab="search" href="#search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span>検索</span>
+    </a>
+    <a class="tab" data-tab="stats" href="#stats">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></svg>
+      <span>記録</span>
+    </a>
+  </nav>
+
+  <dialog id="sheet" class="sheet" aria-label="本の詳細">
+    <button type="button" class="sheet-close" data-act="close" aria-label="閉じる">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <div id="sheet-body" class="sheet-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript><p class="noscript">読書手帖を使うには JavaScript を有効にしてください。</p></noscript>
+</body>
+</html>

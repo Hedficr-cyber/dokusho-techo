@@ -1,0 +1,12 @@
+# 公開しないもの（GitHub に上げない）
+# 作業用：写真の読み取りメモ・照合キャッシュ・検証スクリプトと画像・バックアップ
+_work/
+# Claude と Codex の作業メモ（このPCでだけ使う）
+AGENTS.md
+# OS・エディタ・Python の一時ファイル
+desktop.ini
+.DS_Store
+Thumbs.db
+*.bak
+*.pyc
+__pycache__/

@@ -1,0 +1,113 @@
+// ISBNを連続で読み取る。対応ブラウザはBarcodeDetector、それ以外はZXingを使う。
+import { isbn13 } from './util.js';
+
+const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+// 配信元で中身が書き換えられていたら読み込まない（サブリソース完全性）。版を上げるときはこの値も取り直す
+const ZXING_SRI = 'sha384-BzBxP10ZE72aitqj5UMmUsbKFliP/DZqA8Wq+BNNhlIJDGoEd1tpkMYXOg9+n6sB';
+let zxingLoading = null;
+
+export function loadZxing() {
+  if (window.ZXing) return Promise.resolve(window.ZXing);
+  zxingLoading ||= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = ZXING_URL;
+    script.integrity = ZXING_SRI;
+    script.crossOrigin = 'anonymous';
+    script.referrerPolicy = 'no-referrer';
+    script.async = true;
+    script.onload = () => resolve(window.ZXing);
+    script.onerror = () => {
+      zxingLoading = null;
+      script.remove();
+      reject(new Error('読み取り用の部品を読み込めませんでした。通信状態を確認してください。'));
+    };
+    document.head.append(script);
+  });
+  return zxingLoading;
+}
+
+function cameraError(e) {
+  if (e?.name === 'AbortError') return e;
+  if (['NotAllowedError', 'SecurityError'].includes(e?.name)) return new Error('カメラの使用が許可されていません。ブラウザのカメラ設定で許可してから、もう一度開いてください。ISBNの手入力でも追加できます。');
+  if (['NotFoundError', 'OverconstrainedError'].includes(e?.name)) return new Error('カメラが見つかりません。下の欄にISBNを入力して追加できます。');
+  if (e?.name === 'NotReadableError') return new Error('カメラを他のアプリが使っています。閉じてからもう一度試してください。');
+  return new Error(e?.message || 'カメラを起動できませんでした。');
+}
+
+// signalで起動待ちも中止できる。画面を離れた後にカメラ許可が返ってきた場合も即座に止める。
+export async function startScanner(video, onIsbn, { signal } = {}) {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('この画面ではカメラを使えません（httpsで開く必要があります）。下の欄にISBNを入力して追加できます。');
+  let stopped = false;
+  let stream;
+  let reader;
+  let timer;
+  let lastIsbn = '';
+  let lastAt = 0;
+  const stop = () => {
+    stopped = true;
+    clearTimeout(timer);
+    reader?.reset();
+    stream?.getTracks().forEach((track) => track.stop());
+    video.srcObject = null;
+    signal?.removeEventListener('abort', stop);
+  };
+  const checkActive = () => {
+    if (stopped || signal?.aborted) {
+      stop();
+      throw new DOMException('読み取りを終了しました', 'AbortError');
+    }
+  };
+  signal?.addEventListener('abort', stop, { once: true });
+  const emit = (raw) => {
+    const isbn = isbn13(raw); // 下段の192…価格コードや検査数字の誤りは無視
+    if (!isbn || stopped || signal?.aborted) return;
+    const now = Date.now();
+    if (isbn === lastIsbn && now - lastAt < 4000) return;
+    lastIsbn = isbn;
+    lastAt = now;
+    onIsbn(isbn);
+  };
+  const constraints = { audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+  try {
+    checkActive();
+    let detector;
+    if ('BarcodeDetector' in window) {
+      try {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        if (formats.includes('ean_13')) detector = new window.BarcodeDetector({ formats: ['ean_13'] });
+      } catch { /* ZXingへ切り替える */ }
+    }
+    checkActive();
+    if (!detector) {
+      const ZXing = await loadZxing();
+      checkActive();
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.EAN_13]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      reader = new ZXing.BrowserMultiFormatReader(hints, 250);
+    }
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    checkActive();
+    if (detector) {
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      checkActive();
+      const tick = async () => {
+        if (stopped) return;
+        try { (await detector.detect(video)).forEach((code) => emit(code.rawValue)); }
+        catch { /* フレームの準備中は次を試す */ }
+        if (!stopped) timer = setTimeout(tick, 200);
+      };
+      tick();
+    } else {
+      await reader.decodeFromStream(stream, video, (result) => {
+        if (result) emit(result.getText());
+      });
+      checkActive();
+    }
+    return stop;
+  } catch (e) {
+    stop();
+    throw cameraError(e);
+  }
+}

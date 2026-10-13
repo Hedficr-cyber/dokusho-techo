@@ -385,3 +385,5 @@ input:not(.search-wrap input),textarea,select { border-radius:12px; }
 .rec-reason { margin-top:5px; font-size:11px; line-height:1.6; color:var(--ink-2); }
 .rec-hide { min-height:36px; padding:4px 6px; font-size:11px; color:var(--ink-2); background:transparent; border:0; text-decoration:underline; text-underline-offset:3px; }
 .st-shelf { color:var(--ink-2); }
+
+.grid-view .cover-caption { display:block; margin-top:5px; font-size:11px; color:var(--ink-2); }

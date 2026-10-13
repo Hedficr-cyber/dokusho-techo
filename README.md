@@ -1,6 +1,6 @@
 # 読書手帖（book-app）
 
-個人の読書アプリ。iPhoneのSafariから使う独立Webアプリ（PWA）。確認版：**v0.7.2 / 2026-10-13**（公開中）。Claude Code と Codex が交代で開発している（引き継ぎは共通フォルダの notes）。
+個人の読書アプリ。iPhoneのSafariから使う独立Webアプリ（PWA）。確認版：**v0.7.3 / 2026-10-14**（サイトは公開中。手元の変更の公開反映にはpushが必要）。Claude Code と Codex が交代で開発している（引き継ぎは共通フォルダの notes）。
 
 ## 画面（下のナビ：本棚・作家・検索・記録）
 
@@ -53,9 +53,11 @@ python -X utf8 _work/devserver.py 8765
 
 - `index.html` / `css/app.css`：骨組みとライト/ダークのデザイン。
 - `js/app.js`：画面・操作。`js/store.js`：保存と旧バックアップ互換。`js/shelf.js`：本棚の並べ方。`js/recommend.js`：検索前のおすすめ。`js/authors.js`：作者の読み（五十音順用）。
+- `js/covers.js`：同じ作品/同じ巻の旧版候補を照合。作家の近刊は保存済みのデータにも表紙を補充し、旧版の表紙と未取得を明示。本棚への登録後も候補を保持。
 - `js/ndl.js`：国立国会図書館サーチ API（1件ずつ・429/無応答の再試行・7日キャッシュ）。`js/scan.js`：BarcodeDetector/ZXing。`js/genres.js`：ジャンル定義（本棚の絞り込みと本の詳細で使用）。
-- `data/seed.json`：初期リスト。`sw.js`（キャッシュ dokusho-techo-v9）/ `manifest.webmanifest` / `icons`：PWA。
+- `data/seed.json`：初期リスト。`sw.js`（キャッシュ dokusho-techo-v10）/ `manifest.webmanifest` / `icons`：PWA。
 - `_work/regression.cjs`：登録、ISBN、検索タブ、フォロー、復元、旧データ互換、320〜414px。`--live` で実APIとZXingも確認（Node.js と Playwright。Codex ランタイムの node_modules を NODE_PATH に指定すれば Claude 側でも実行できる）。2026-10-13 v0.7.2 で 14 項目すべて通過（おすすめ・初期リストの ISBN 修正・CSP の確認を含む）。
+- `_work/release-cover-qa.cjs`：白い仮表紙、ISBN-10、同作品/同じ巻、候補の取得失敗と次候補、既存新刊の補充、既読/確認時刻保持、登録後の表紙、4画面幅/ダーク。`--live`で実NDLと画像配信元を確認。
 - `_work/liquid-genre-qa.cjs`：v0.4 のジャンル画面向けで、検索タブへの置き換え後は対象外（参考として残置）。
 - `_work/ui-qa.cjs` / `pwa-smoke.cjs`：Codex 作成の表示・オフライン確認。
 

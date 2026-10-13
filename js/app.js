@@ -5,11 +5,12 @@ import { startScanner } from './scan.js';
 import { authorReading } from './authors.js';
 import { SHELF_MODES, primaryGenre, sortShelfBooks } from './shelf.js';
 import { recommendPlan, pickRecommendations, shelfTitleMap } from './recommend.js';
+import { coverIsbn, coverCandidates, releaseIdentity, previousCoverIsbns, COVER_LOOKUP_VERSION } from './covers.js';
 import {
   esc, normTitle, normName, mainTitle, clothColor, today, monthsAgo, monthLabel, isbn13,
 } from './util.js';
 
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.7.3';
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
 const sheet = $('#sheet');
@@ -57,46 +58,34 @@ const COVER_SOURCES = [
 ];
 const coverUrl = (isbn, step = 0) => COVER_SOURCES[step](isbn);
 
-// 10 桁の ISBN（2006 年までの本）は 13 桁に直して探す
-function isbnForCover(raw) {
-  const d = String(raw || '').replace(/[^\dXx]/g, '');
-  if (/^\d{13}$/.test(d)) return d;
-  if (!/^\d{9}[\dXx]$/.test(d)) return '';
-  const core = `978${d.slice(0, 9)}`;
-  const sum = [...core].reduce((s, c, i) => s + Number(c) * (i % 2 ? 3 : 1), 0);
-  return core + ((10 - (sum % 10)) % 10);
-}
-
-// altIsbn：その本の表紙が見つからないときに使う、同じ作品の別の版（発売前の新装版など）
-function cover(title, isbn, size = 's', altIsbn = '') {
-  const clean = isbnForCover(isbn) || isbnForCover(altIsbn);
-  const alt = isbnForCover(altIsbn);
-  const spine = `<span class="spine" style="--cloth:${clothColor(title)}"><span class="spine-t">${esc(mainTitle(title))}</span></span>`;
-  const img = clean
-    ? `<img alt="" loading="lazy" decoding="async" data-isbn="${clean}" data-step="0"${alt && alt !== clean ? ` data-alt="${alt}"` : ''} src="${coverUrl(clean, 0)}">` : '';
+// 旧版の候補を順に試す。ISBNは書誌と一致するものだけを使う。
+function cover(title,isbn,size='s',alternatives=[]) {
+  const candidates=coverCandidates(isbn,alternatives);
+  const spine=`<span class="spine" style="--cloth:${clothColor(title)}"><span class="spine-t">${esc(mainTitle(title))}</span></span>`;
+  const img=candidates.length ? `<img alt="" loading="lazy" decoding="async" data-isbn="${candidates[0]}" data-original="${coverIsbn(isbn)}" data-candidates="${candidates.join(',')}" data-candidate="0" data-step="0" src="${coverUrl(candidates[0],0)}">` : '';
   return `<span class="cover ${size}" aria-hidden="true">${spine}${img}</span>`;
 }
-
-function nextCover(img) {
-  const step = Number(img.dataset.step) + 1;
-  if (step < COVER_SOURCES.length) {
-    img.dataset.step = String(step);
-    img.src = coverUrl(img.dataset.isbn, step);
-  } else if (img.dataset.alt) { // 別の版の表紙を、版元ドットコムから順に試す
-    img.dataset.isbn = img.dataset.alt;
-    delete img.dataset.alt;
-    img.dataset.step = '0';
-    img.src = coverUrl(img.dataset.isbn, 0);
-  } else img.remove();
+function setCoverCaption(img,missing=false) {
+  const row=img.closest('.book,.detail-head'),caption=row?.querySelector('.cover-caption');
+  if (!caption) return;
+  const text=missing ? '表紙未取得'
+    : img.dataset.isbn!==img.dataset.original ? '旧版の表紙を表示' : '';
+  caption.textContent=text;caption.hidden=!text;
 }
-
-// 「画像なし」の見分け方：版元ドットコムは 50×71 の小さな画像、発売前は「11月の新刊」のような正方形の仮の画像、
-// Google Books は 128×170 の「image not available」や正方形・横長の画像を返す（本の表紙は縦長）
+function nextCover(img) {
+  img.classList.remove('ok');
+  const step=Number(img.dataset.step)+1;
+  if (step<COVER_SOURCES.length) { img.dataset.step=String(step);img.src=coverUrl(img.dataset.isbn,step);return; }
+  const candidates=img.dataset.candidates.split(',');
+  const index=Number(img.dataset.candidate)+1;
+  if (index<candidates.length) {
+    img.dataset.candidate=String(index);img.dataset.isbn=candidates[index];img.dataset.step='0';img.src=coverUrl(candidates[index],0);
+  } else { setCoverCaption(img,true);img.remove(); }
+}
+// 寸法が判明している「画像なし」と、正方形の刊行前の仮画像を除く。
 function isNoCoverImage(img) {
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
-  if (w < 60 || h <= w * 1.05) return true;
-  return img.dataset.step !== '0' && w === 128 && h === 170;
+  const w=img.naturalWidth,h=img.naturalHeight;
+  return w<60 || h<=w*1.05 || (img.dataset.step!=='0' && w===128 && h===170);
 }
 
 document.addEventListener('error', (e) => {
@@ -108,7 +97,7 @@ document.addEventListener('load', (e) => {
   const img = e.target;
   if (!(img instanceof HTMLImageElement) || !img.dataset.isbn) return;
   if (isNoCoverImage(img)) nextCover(img);
-  else img.classList.add('ok');
+  else { img.classList.add('ok'); setCoverCaption(img); }
 }, true);
 
 const ICONS = {
@@ -133,10 +122,11 @@ const metaLine = (b) => [b.publisher, b.year && `${b.year}年`, b.format].filter
 function bookRow(b, options = {}) {
   const note = b.memo || b.note;
   return `<li class="book" role="button" tabindex="0" aria-label="${esc(b.title)}の詳細" data-act="open" data-id="${esc(b.id)}">
-    ${cover(b.title, b.isbn)}
+    ${cover(b.title, b.isbn, 's', b.coverIsbns || b.coverIsbn || [])}
     <div class="book-main">
       <div class="book-title">${esc(b.title)}</div>
       <div class="book-author">${esc(b.author)}</div>
+      <div class="book-meta cover-caption" hidden></div>
       ${metaLine(b) ? `<div class="book-meta">${metaLine(b)}</div>` : ''}
       ${note ? `<div class="book-note">${esc(note)}</div>` : ''}
     </div>
@@ -254,9 +244,10 @@ function renderSheetBook(id) {
   const photos = b.photos?.length ? `写真 ${b.photos.length > 6 ? `#${b.photos[0]}〜#${b.photos[b.photos.length - 1]}（${b.photos.length}枚）` : b.photos.map((n) => `#${n}`).join(' ')}` : '';
   sheetBody.innerHTML = `
     <div class="detail-head">
-      ${cover(b.title, b.isbn, 'm')}
+      ${cover(b.title, b.isbn, 'm', b.coverIsbns || b.coverIsbn || [])}
       <div class="detail-title">
         <h2>${esc(b.title)}</h2>
+        <p class="book-meta cover-caption" hidden></p>
         <p><button type="button" class="link" data-act="author" data-name="${esc(b.author)}">${esc(b.author)}</button></p>
         ${metaLine(b) ? `<p class="muted">${metaLine(b)}</p>` : ''}
         ${b.needsCheck ? '<p class="warn">書誌データが未確認です。書名・作家が合っているか確かめてください。</p>' : ''}
@@ -484,11 +475,12 @@ function renderAuthorHome() {
   const candidates = shelfAuthors.filter(([n, c]) => c >= 2 && !store.isFollowing(n));
   const last = follows.map((f) => f.lastChecked).filter(Boolean).sort().pop();
   const relRow = (r) => `<li class="book work">
-      ${cover(r.title, r.isbn, 's', r.coverIsbn)}
+      ${cover(r.title, r.isbn, 's', r.coverIsbns || r.coverIsbn || [])}
       <div class="book-main">
         <div class="book-title">${newKeys.has(r.key) ? '<span class="new">NEW</span>' : ''}${esc(r.title)}</div>
         <div class="book-author"><button type="button" class="link" data-act="author" data-name="${esc(r.author)}">${esc(r.author)}</button></div>
         <div class="book-meta"><b class="${r.month > thisMonth ? 'soon' : ''}">${esc(monthLabel(r.month))}${r.month > thisMonth ? '発売予定' : '発売'}</b>${r.publisher ? `・${esc(r.publisher)}` : ''}</div>
+        <div class="book-meta cover-caption" ${coverCandidates(r.isbn,r.coverIsbns || r.coverIsbn || []).length || r.month<=thisMonth ? 'hidden' : ''}>表紙未取得</div>
       </div>
       <div class="book-side">
         <button type="button" class="add-btn" data-act="release-add" data-key="${esc(r.key)}">＋登録</button>
@@ -522,7 +514,7 @@ function renderAuthorHome() {
 
 function renderAuthor(name) {
   const token = ++renderToken;
-  if (!name) { renderAuthorHome(); return; }
+  if (!name) { renderAuthorHome(); hydrateReleaseCovers(); return; }
   view.innerHTML = `
     <section>
       ${searchBar(name)}
@@ -601,21 +593,12 @@ async function checkReleases(names) {
       const owned = shelfIndex();
       const items = works.filter((w) => !owned(w)).map((w) => ({
         key: `${normTitle(w.main + (w.volume || ''))}|${normName(name)}`,
-        title: w.main + (w.volume ? ` ${w.volume}` : ''), author: name, month: w.lastMonth,
+        title: w.main + (w.volume ? ` ${w.volume}` : ''), baseTitle:w.main, volume:w.volume || '', author: name, month: w.lastMonth,
         publisher: w.latest?.publisher || '', isbn: w.latest?.isbn || '', link: w.latest?.link || '', ndc: w.ndc || '',
       }));
-      // 発売前の本は ISBN が未登録だったり、表紙がまだ仮の画像だったりする。
-      // 同じ作品の以前の版があれば、その表紙を代わりに使う（例：恋のゴンドラ、探偵倶楽部 新装版）
-      const thisMonth = today().slice(0, 7);
-      for (const it of items.filter((x) => !x.isbn || x.month >= thisMonth)) {
+      for (const it of items.filter(x=>!x.isbn || x.month>=today().slice(0,7))) {
         if (!store.isFollowing(name)) break;
-        try {
-          // 「探偵倶楽部 新装版」の旧版は書名に「新装版」が付かないので、版の表記を外して探す
-          const base = it.title.replace(/[\s　]*[〈（(【]?(新装改訂版|改訂完全版|新装版|増補版|完全版|決定版|改訂版|新版|愛蔵版)[〉）)】]?[\s　]*/g, ' ').trim();
-          const same = (await ndl.searchTitle(base, name)).find((w) => w.keys.includes(normTitle(base)) && w.isbns.some((i) => i !== it.isbn));
-          const others = same ? same.editions.filter((e) => e.isbn && e.isbn !== it.isbn) : [];
-          if (others.length) it.coverIsbn = others[others.length - 1].isbn; // いちばん新しい既刊の版
-        } catch { /* 表紙が無いだけなので続ける */ }
+        try { Object.assign(it,await resolveReleaseCovers(it)); } catch { /* 書誌の新刊確認は続ける */ }
       }
       found += store.addReleases(name, items);
     } catch (e) {
@@ -628,6 +611,31 @@ async function checkReleases(names) {
   checking = null;
   refreshReleaseUI();
   if (found) toast(`フォロー中の作家の新刊・近刊が${found}冊見つかりました（作家タブ）`);
+}
+
+async function resolveReleaseCovers(item) {
+  const identity=releaseIdentity(item);
+  const works=await ndl.searchTitle(identity.base,item.author);
+  const coverIsbns=previousCoverIsbns(item,works);
+  return {coverIsbns,coverIsbn:coverIsbns[0] || '',coverCheckedAt:new Date().toISOString(),coverLookupVersion:COVER_LOOKUP_VERSION};
+}
+let hydratingReleaseCovers=null;
+function hydrateReleaseCovers() {
+  if (hydratingReleaseCovers) return hydratingReleaseCovers;
+  const month=today().slice(0,7);
+  const items=store.releases().filter(r=>store.isFollowing(r.author) && (!r.isbn || r.month>=month)
+    && (r.coverLookupVersion!==COVER_LOOKUP_VERSION || !r.coverCheckedAt || Date.now()-Date.parse(r.coverCheckedAt)>7*24*3600*1000));
+  hydratingReleaseCovers=(async()=>{
+    for (const item of items) {
+      if ((route.name==='search' && ui.searchQ) || sheet.open) break; // 手入力/検索を待たせず、作家画面へ戻ったとき再開する
+      if (!store.isFollowing(item.author) || !store.releases().some(r=>r.key===item.key)) continue;
+      try {
+        const patch=await resolveReleaseCovers(item);
+        if (store.isFollowing(item.author)) store.updateReleaseCovers(item.key,patch);
+      } catch { /* 一時的な通信エラーでは更新済み扱いにせず、次回に試す */ }
+    }
+  })().finally(()=>{hydratingReleaseCovers=null;});
+  return hydratingReleaseCovers;
 }
 
 const staleFollows = () => store.follows()
@@ -768,7 +776,7 @@ function renderStats() {
     if (month !== lastMonth) { lastMonth = month; heading = `<li class="history-month">${month === 'unknown' ? '読了日未登録' : esc(monthLabel(month))}</li>`; }
     return `${heading}<li class="book history-book" role="button" tabindex="0" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)}の読書記録">
       <span class="finished-day">${b.finishedAt ? Number(b.finishedAt.slice(8,10)) : '—'}<small>${b.finishedAt ? '日' : ''}</small></span>
-      ${cover(b.title,b.isbn)}<div class="book-main"><div class="book-title">${esc(b.title)}</div><div class="book-author">${esc(b.author)}</div>
+      ${cover(b.title,b.isbn,'s',b.coverIsbns || b.coverIsbn || [])}<div class="book-main"><div class="book-title">${esc(b.title)}</div><div class="book-author">${esc(b.author)}</div>
         ${b.memo ? `<p class="history-memo">${esc(b.memo)}</p>` : ''}${b.rating ? `<span class="rating">${stars(b.rating)}</span>` : ''}</div>${icon('arrow')}
     </li>`;
   }).join('');
@@ -992,6 +1000,8 @@ const actions = {
     store.add({
       title: r.title, author: r.author, status: 'want', priority: 3, genres, source: 'release',
       note: `${monthLabel(r.month)}${soon ? '発売予定' : '発売'}`, isbn: r.isbn, publisher: r.publisher,
+      coverIsbns:r.coverIsbns || [].concat(r.coverIsbn || []).filter(Boolean), coverIsbn:r.coverIsbn || '',
+
       year: r.month.slice(0, 4), ndc: r.ndc, ndl: r.link, needsCheck: !r.isbn,
     });
     store.dismissRelease(r.key);
@@ -1088,7 +1098,7 @@ store.mergeSeed('data/seed.json').then((n) => {
   if (n) toast(`写真から読み取った${n}冊を本棚に入れました`);
   updateBadge();
   const stale = staleFollows(); // 前回のチェックから 12 時間たった作家だけ調べ直す
-  if (stale.length) checkReleases(stale);
+  hydrateReleaseCovers().finally(()=>{ if (stale.length) checkReleases(stale); });
 });
 navigator.storage?.persist?.().catch(() => {});
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

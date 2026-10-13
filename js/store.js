@@ -160,12 +160,21 @@ export function addReleases(name, items) {
     const old = state.releases.find((r) => r.key === it.key);
     if (!old || fresh.includes(it)) continue;
     if (!old.isbn && it.isbn) old.isbn = it.isbn;
-    if (!old.coverIsbn && it.coverIsbn) old.coverIsbn = it.coverIsbn;
+    if (it.coverLookupVersion) Object.assign(old,{coverIsbns:it.coverIsbns,coverIsbn:it.coverIsbn,coverCheckedAt:it.coverCheckedAt,coverLookupVersion:it.coverLookupVersion});
+    else if (!old.coverIsbn && it.coverIsbn) old.coverIsbn = it.coverIsbn;
   }
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f) f.lastChecked = new Date().toISOString();
   save();
   return fresh.length;
+}
+
+// 表紙の補充だけを保存。既読状態/新刊件数/フォローの確認時刻は変えない。
+export function updateReleaseCovers(key,patch) {
+  const item=state.releases.find(r=>r.key===key);
+  if (!item) return;
+  Object.assign(item,{coverIsbns:patch.coverIsbns,coverIsbn:patch.coverIsbn,coverCheckedAt:patch.coverCheckedAt,coverLookupVersion:patch.coverLookupVersion});
+  save();
 }
 
 export function markReleasesSeen() {

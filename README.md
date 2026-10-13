@@ -1,6 +1,6 @@
 # 読書手帖（book-app）
 
-個人の読書アプリ。iPhoneのSafariから使う独立Webアプリ（PWA）。確認版：**v0.7.0 / 2026-10-13**。Claude Code と Codex が交代で開発している（引き継ぎは共通フォルダの notes）。
+個人の読書アプリ。iPhoneのSafariから使う独立Webアプリ（PWA）。確認版：**v0.7.2 / 2026-10-13**（公開中）。Claude Code と Codex が交代で開発している（引き継ぎは共通フォルダの notes）。
 
 ## 画面（下のナビ：本棚・作家・検索・記録）
 
@@ -28,7 +28,7 @@ python -X utf8 _work/devserver.py 8765
 
 ## iPhoneで使う
 
-1. HTTPS のURLに公開する（未公開）。2026-10-13 にユーザーが **GitHub Pages** を選択。GitHub アカウント `Hedficr-cyber` あり。リポジトリ作成・ログイン・Pages の有効化はユーザー本人が行う。
+1. 公開URL：https://hedficr-cyber.github.io/dokusho-techo/ （GitHub Pages・2026-10-13 公開。リポジトリ https://github.com/Hedficr-cyber/dokusho-techo ）
 2. iPhoneのSafariで開き、「共有」→「ホーム画面に追加」。
 3. 「検索」→「バーコードで読み取る」でカメラを許可（https でないとカメラは動かない）。許可できない場合はISBNを手入力。
 4. 好きな作家のページで「新刊をフォロー」。
@@ -37,16 +37,25 @@ python -X utf8 _work/devserver.py 8765
 
 - 本棚データは端末のブラウザのlocalStorageに保存。PCとiPhoneは自動同期しない。「記録」→「データのバックアップ」でJSONを書き出して移せる。
 - 新刊のお知らせはアプリを開いたとき（12時間ごと）に確認。ロック画面へのプッシュ通知は未実装。
-- 公開用ファイル一式：`_work/読書手帖_公開用_2026-10-13.zip`（v0.6 の内容で作り直し済み）。初期リスト213冊を含むので、公開URLにアクセスできる人はこのリストを見られる。
-- `_work` の検証画像や中間ファイル、元の写真は公開しない（.gitignore で除外）。
+- 公開は `main` ブランチをそのまま GitHub Pages で配信（`.nojekyll` あり）。初期リスト213冊を含むので、公開URLにアクセスできる人はこのリストを見られる。登録・読了などの記録は各端末の中だけで、公開されない。
+- `_work` の検証画像や中間ファイル、元の写真、`AGENTS.md` は公開しない（.gitignore で除外）。
+- 更新の手順：変更をコミット → `git push`（認証は Git Credential Manager。Claude Code のシェルからは認証画面を出せないので、ターミナルパネルで実行）。
+
+## セキュリティ
+
+- コンテンツセキュリティポリシー（index.html の meta）：スクリプトは自サイトとバーコード部品（版・ファイル固定）だけ、通信は国立国会図書館だけ、画像は表紙の配信元だけ。埋め込み・プラグイン・外部へのフォーム送信は禁止。配信元を足すときはここも直す。
+- バーコード部品は改ざん検知（SRI）つきで読み込む。外部サイトへリファラを送らない。
+- 画面に出す文字はすべてエスケープ。国会図書館へのリンクは `https://ndlsearch.ndl.go.jp/` で始まるものだけ。ISBN は数字と X だけ残す。
+- GitHub Pages は HTTPS 強制（HSTS あり）。GitHub アカウントはパスキー設定済み。
+- 確認：`_work/regression.cjs`（手元）と `_work/live_check.cjs`（公開サイト：外部スクリプトの差し込みが止まるか等）。2026-10-13 どちらも通過。
 
 ## ソースと検証
 
 - `index.html` / `css/app.css`：骨組みとライト/ダークのデザイン。
 - `js/app.js`：画面・操作。`js/store.js`：保存と旧バックアップ互換。`js/shelf.js`：本棚の並べ方。`js/recommend.js`：検索前のおすすめ。`js/authors.js`：作者の読み（五十音順用）。
 - `js/ndl.js`：国立国会図書館サーチ API（1件ずつ・429/無応答の再試行・7日キャッシュ）。`js/scan.js`：BarcodeDetector/ZXing。`js/genres.js`：ジャンル定義（本棚の絞り込みと本の詳細で使用）。
-- `data/seed.json`：初期リスト。`sw.js`（キャッシュ dokusho-techo-v7）/ `manifest.webmanifest` / `icons`：PWA。
-- `_work/regression.cjs`：登録、ISBN、検索タブ、フォロー、復元、旧データ互換、320〜414px。`--live` で実APIとZXingも確認（Node.js と Playwright。Codex ランタイムの node_modules を NODE_PATH に指定すれば Claude 側でも実行できる）。2026-10-13 v0.7 で 12 項目すべて通過（おすすめの確認を含む）。
+- `data/seed.json`：初期リスト。`sw.js`（キャッシュ dokusho-techo-v9）/ `manifest.webmanifest` / `icons`：PWA。
+- `_work/regression.cjs`：登録、ISBN、検索タブ、フォロー、復元、旧データ互換、320〜414px。`--live` で実APIとZXingも確認（Node.js と Playwright。Codex ランタイムの node_modules を NODE_PATH に指定すれば Claude 側でも実行できる）。2026-10-13 v0.7.2 で 14 項目すべて通過（おすすめ・初期リストの ISBN 修正・CSP の確認を含む）。
 - `_work/liquid-genre-qa.cjs`：v0.4 のジャンル画面向けで、検索タブへの置き換え後は対象外（参考として残置）。
 - `_work/ui-qa.cjs` / `pwa-smoke.cjs`：Codex 作成の表示・オフライン確認。
 

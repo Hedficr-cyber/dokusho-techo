@@ -95,6 +95,10 @@ export function pubMonth(...candidates) {
   return '';
 }
 
+// 新刊として扱ってよい記録：ISBN がある本か、国会図書館の所蔵（R100000002）・出版社の近刊情報（R100000137）。
+// サピエ図書館の点字・音声データなど ISBN のない別の形の記録は、古い本でも作成月が新しいので新刊にしない
+export const isPrintRecord = (r) => !!r?.isbn || !r?.link || /\/books\/R100000(?:002|137)-/.test(r.link);
+
 // 「2026-10」→「2026年10月」
 export const monthLabel = (ym) => (ym ? ym.replace(/^(\d{4})-0?(\d{1,2})$/, '$1年$2月').replace(/^(\d{4})$/, '$1年') : '');
 

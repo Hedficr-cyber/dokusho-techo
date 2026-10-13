@@ -408,3 +408,42 @@ input:not(.search-wrap input),textarea,select { border-radius:12px; }
 .version-heading h3 { font-size:20px; font-weight:700; }
 .version-heading time { font-size:12px; color:var(--ink-2); }
 .version-history ul { padding-left:1.3em; font-size:13px; line-height:1.9; }
+
+/* v0.8: 本棚の分類を一つの静かなガラス面に。選択だけが浮く。 */
+.shelf .shelf-genres { grid-template-columns:repeat(3,minmax(0,1fr)); max-width:none; gap:4px; padding:6px; border:1px solid var(--glass-edge); border-radius:22px; background:rgba(232,232,238,.64); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); box-shadow:inset 0 1px 0 #ffffffc9,0 2px 8px #24242704; }
+.shelf .genre-filter { min-height:44px; padding:10px 5px; border:0; border-radius:16px; background:transparent; color:var(--ink-2); font-size:12px; transition:background .2s,box-shadow .2s,color .2s; }
+.shelf .genre-filter:first-child { grid-column:1/-1; }
+.shelf .genre-filter.on { background:var(--surface); color:var(--ink); box-shadow:0 2px 7px #24242714,inset 0 1px 0 #ffffff9c; font-weight:700; }
+@media(hover:hover) { .shelf .genre-filter:hover:not(.on) { background:var(--glass); color:var(--ink); } .work-open:hover .book-title { color:var(--ink-2); } }
+@media(min-width:800px) { .shelf .shelf-genres { grid-template-columns:repeat(7,minmax(0,1fr)); } .shelf .genre-filter:first-child { grid-column:auto; } }
+@media(max-width:370px) { .shelf .shelf-genres { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+/* 「ノンフィクション」が375px幅で2行に折れないよう、余白を詰めて1行に保つ */
+.shelf .genre-filter { white-space:nowrap; padding-inline:2px; }
+@media(prefers-color-scheme:dark) { .shelf .shelf-genres { background:rgba(48,48,54,.7); border-color:#ffffff12; box-shadow:inset 0 1px 0 #ffffff14; } .shelf .genre-filter.on { background:#505057; box-shadow:0 2px 8px #00000030,inset 0 1px 0 #ffffff12; } }
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) { .shelf .shelf-genres { background:var(--surface-2); } }
+@media(prefers-reduced-transparency:reduce) { .shelf .shelf-genres { background:var(--surface-2); -webkit-backdrop-filter:none; backdrop-filter:none; } }
+/* 登録ボタンと、本の情報を開くタップ領域は独立。 */
+.work-open { flex:1; min-width:0; display:flex; align-items:center; gap:15px; padding:0; text-align:left; border-radius:8px; }
+.work-open .book-main>span { display:block; }
+.book-preview .detail-head { margin-bottom:22px; }
+.preview-eyebrow { color:var(--ink-2); font-size:11px!important; letter-spacing:.08em; margin:0 0 5px!important; }
+.preview-facts { margin:0; border-block:1px solid var(--line); padding:6px 0; }
+.preview-facts>div { display:grid; grid-template-columns:65px minmax(0,1fr); gap:16px; align-items:center; min-height:50px; }
+.preview-facts dt { font-size:12px; color:var(--ink-2); }
+.preview-facts dd { margin:0; font-size:14px; overflow-wrap:anywhere; }
+.preview-facts .first-pub { display:block; margin-top:2px; font-size:12px; color:var(--ink-2); }
+.preview-facts .link { min-height:44px; padding:4px 0; text-align:left; }
+.preview-summary { margin-top:26px; }
+.preview-summary h3 { font-size:14px; font-weight:700; margin-bottom:14px; }
+.synopsis-text { font-size:14px; line-height:2; white-space:pre-line; overflow-wrap:anywhere; }
+#preview-synopsis>.muted { font-size:13px; line-height:1.9; }
+#preview-synopsis>.loading { margin:12px 0; font-size:13px; }
+#preview-synopsis>.ghost { margin-top:12px; }
+.preview-source { margin-top:18px; color:var(--ink-2); font-size:11px; }
+.preview-source a { display:inline-flex; align-items:center; min-height:44px; text-decoration:underline; text-underline-offset:3px; }
+.preview-action { padding-top:20px; margin-top:16px; border-top:1px solid var(--line); }
+.preview-action .primary { width:100%; min-height:50px; }
+/* スクロールで到達した本だけ、少し持ち上がって現れる。 */
+.book.reveal-item { opacity:0; transform:translateY(22px); transition:opacity .6s cubic-bezier(.2,.65,.3,1),transform .6s cubic-bezier(.2,.65,.3,1); }
+.book.reveal-item.is-revealed { opacity:1; transform:translateY(0); }
+@media(prefers-reduced-motion:reduce) { .book.reveal-item { opacity:1; transform:none; transition:none; } .sheet[open] { animation:none; } }

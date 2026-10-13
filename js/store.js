@@ -1,6 +1,6 @@
 // 本棚データの保存先。いまはこの端末のブラウザ（localStorage）に保存する。
 // 後でクラウド同期にするときは、このファイルの load/save だけを差し替える。
-import { uid, today, normName } from './util.js';
+import { uid, today, normName, isPrintRecord } from './util.js';
 
 const KEY = 'dokusho-techo:v1';
 const EMPTY = {
@@ -20,6 +20,8 @@ export function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) state = prepareBackup(JSON.parse(raw));
+    // v0.7 までに点字版などの記録から新刊として拾ったもの（例：恋のゴンドラ）を外す
+    state.releases = state.releases.filter(isPrintRecord);
   } catch {
     /* 読めないときは空の本棚で始める */
   }

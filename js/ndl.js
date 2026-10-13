@@ -1,8 +1,9 @@
 // 国立国会図書館サーチ OpenSearch API の呼び出し。
 // 同時アクセスに厳しいので 1 件ずつ間隔をあけて呼び、結果は 7 日間この端末に保存して使い回す。
+import { publicationDate } from './book-details.js';
 import {
   normTitle, normName, nameParts, mainTitle, authorMatches, cleanCreator, respAuthor, year,
-  formatFromExtent, formatFromSeries, pubMonth,
+  formatFromExtent, formatFromSeries, pubMonth, isPrintRecord,
 } from './util.js';
 
 const BASE = 'https://ndlsearch.ndl.go.jp/api/opensearch';
@@ -81,6 +82,7 @@ function parse(xml) {
       resp: [...it.children].find((n) => n.tagName === 'author')?.textContent.trim() || '', // 責任表示（海外著者のカタカナ名はここだけ）
       publisher: text(it, 'dc:publisher'),
       issued: text(it, 'dcterms:issued'),
+      publishedAt: publicationDate(text(it,'dc:date')) || publicationDate(text(it,'dcterms:issued')),
       year: year(text(it, 'dcterms:issued')),
       month: pubMonth(text(it, 'dc:date'), text(it, 'dcterms:issued')), // 「2026-10」。近刊は発売予定月
       format: formatFromSeries(series) || formatFromExtent(extent),
@@ -201,8 +203,8 @@ export async function searchIsbn(isbn) {
 // フォロー中の著者の新刊・近刊（出版社の近刊情報も含む）。新刊チェックは 6 時間だけ結果を使い回す
 export async function searchReleases(name, fromMonth) {
   const items = await query({ creator: name, from: fromMonth, cnt: 60, dpid: null }, { ttl: 6 * 3600 * 1000 });
-  const own = items.filter((it) => it.creators.some((c) => authorMatches(c, name))
-    || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name)));
+  const own = items.filter((it) => isPrintRecord(it) && (it.creators.some((c) => authorMatches(c, name))
+    || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name))));
   return groupWorks(own)
     .filter((w) => w.creators.length <= 3 && w.lastMonth >= fromMonth)
     .sort((a, b) => b.lastMonth.localeCompare(a.lastMonth));

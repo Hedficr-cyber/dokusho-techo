@@ -1272,6 +1272,8 @@ window.addEventListener('hashchange', onHash);
 onHash();
 store.mergeSeed('data/seed.json').then((n) => {
   if (n) toast(`写真から読み取った${n}冊を本棚に入れました`);
+  // 初めて開いた端末で検索タブから入ると、おすすめを空の本棚で作ってしまう。取り込み後に作り直す
+  if (n && route.name === 'search' && !ui.searchQ) loadRecommendations();
   updateBadge();
   const stale = staleFollows(); // 前回のチェックから 12 時間たった著者だけ調べ直す
   hydrateReleaseCovers().finally(()=>{ if (stale.length) checkReleases(stale); });

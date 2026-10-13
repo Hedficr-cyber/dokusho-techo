@@ -670,7 +670,13 @@ async function resolveReleaseCovers(item) {
   const works=await ndl.searchTitle(identity.base,item.author,{allSources:true});
   const isbn=currentReleaseIsbn(release,works);
   if (isbn) release.isbn=isbn;
-  const coverIsbns=previousCoverIsbns(release,works);
+  let coverIsbns=previousCoverIsbns(release,works);
+  // 旧版の副題が「爆弾 2」、新刊が「爆弾2」のように異なり、NDLの書名検索で漏れる場合。
+  const broader=identity.base.match(/^(.{2,})\s+[^\s]*\d+$/)?.[1];
+  if (!coverIsbns.length && broader && broader!==identity.base) {
+    const editions=await ndl.searchTitle(broader,item.author,{allSources:true});
+    coverIsbns=previousCoverIsbns(release,editions); // 候補を広げても書名・巻・著者の一致は保つ
+  }
   return {...confirmed,...(isbn ? {isbn} : {}),coverIsbns,coverIsbn:coverIsbns[0] || '',coverCheckedAt:new Date().toISOString(),coverLookupVersion:COVER_LOOKUP_VERSION};
 }
 let hydratingReleaseCovers=null;

@@ -2,7 +2,7 @@ import { normTitle, normName, authorMatches, today } from './util.js';
 
 // 実画像の確認で判明した近刊の白い仮表紙。刊行日以降は新しい表紙を再び優先する。
 const temporaryCovers = { '9784408560472':'2026-12-04' }; // 白銀ジャック 増補版
-export const COVER_LOOKUP_VERSION = 2;
+export const COVER_LOOKUP_VERSION = 3;
 export function coverIsbn(raw) {
   const d=String(raw || '').replace(/[^\dXx]/g,'');
   if (/^\d{13}$/.test(d)) return d;
@@ -36,15 +36,21 @@ export function confirmedRelease(release) {
   return match && !release.isbn ? {isbn:match.isbn,publishedAt:match.publishedAt} : {};
 }
 const titleKeys=s=>{
-  const clean=releaseIdentity({title:s}).base;
+  const clean=String(s || '').normalize('NFKC').replace(/【電子限定特典付き】/g,'').replace(editionWords,' ').trim();
   const parts=clean.split(/\s:\s/);
   return [normTitle(clean),normTitle(parts.slice().reverse().join(' '))];
 };
 function matchingCoverEditions(release,works) {
   const {base,volume}=releaseIdentity(release),keys=titleKeys(base);
-  return works.filter(w=>!w.isComic && (!release.author || !w.creators?.length || w.creators.some(c=>authorMatches(c,release.author)))
-    && String(w.volume || '').normalize('NFKC').trim()===volume
-    && [w.main,w.title,...(w.editions || []).map(e=>e.title)].some(t=>titleKeys(t).some(k=>keys.includes(k))))
+  return works.filter(w=>{
+    const workVolume=String(w.volume || '').normalize('NFKC').trim();
+    // 旧データでは「爆弾2」のような巻名が書名の末尾に入り、volume項目がないことがある。
+    const combined=`${w.main || w.title || ''} ${workVolume}`;
+    const volumeMatches=workVolume===volume || (!volume && workVolume && keys.includes(normTitle(combined)));
+    return !w.isComic && (!release.author || !w.creators?.length || w.creators.some(c=>authorMatches(c,release.author)))
+      && volumeMatches && [w.main,w.title,...(w.editions || []).map(e=>e.title),...(!volume && workVolume ? [combined] : [])]
+        .some(t=>titleKeys(t).some(k=>k && keys.includes(k)));
+  })
     .flatMap(w=>w.editions || []);
 }
 export function currentReleaseIsbn(release,works) {

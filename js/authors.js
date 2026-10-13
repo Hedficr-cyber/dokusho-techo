@@ -1,4 +1,4 @@
-// 国会図書館の名称典拠を、既存書誌の生年と照合した作者の読み。
+// 国会図書館の名称典拠を、既存書誌の生年と照合した著者の読み。
 // 出典と同姓同名の確認記録：_work/author_reading_sources_2026-10-13.json。
 import { normName } from './util.js';
 const readings = {

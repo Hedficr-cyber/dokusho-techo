@@ -387,3 +387,24 @@ input:not(.search-wrap input),textarea,select { border-radius:12px; }
 .st-shelf { color:var(--ink-2); }
 
 .grid-view .cover-caption { display:block; margin-top:5px; font-size:11px; color:var(--ink-2); }
+
+/* v0.7.4：上部は静かな操作面。スマホでジャンルの列と行を揃える。 */
+.shelf-genres { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:16px 0 8px; }
+.genre-filter { display:flex; align-items:center; justify-content:center; min-width:0; min-height:44px; padding:10px 4px; border:1px solid var(--line); border-radius:10px; font-size:12px; line-height:1.45; text-align:center; background:transparent; color:var(--ink-2); }
+.genre-filter.on { background:var(--ink); border-color:var(--ink); color:var(--paper); font-weight:600; }
+.genre-filter:hover:not(.on) { background:var(--surface); color:var(--ink); }
+.shelf-direction { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+.direction-btn { min-height:44px; padding:10px 14px; border-radius:10px; border:1px solid var(--line); color:var(--ink-2); background:transparent; font-size:12px; }
+.direction-btn.on { color:var(--ink); background:var(--surface); border-color:var(--ink); font-weight:600; }
+.shelf-end { min-height:44px; margin:24px 0 0; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+@media(min-width:650px) { .shelf-genres { grid-template-columns:repeat(4,minmax(0,1fr)); max-width:760px; } }
+@media(max-width:350px) { .shelf-genres { grid-template-columns:repeat(2,minmax(0,1fr)); } .genre-filter { font-size:13px; } }
+
+.app-footer { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px 12px; }
+.app-footer .link { min-height:44px; font-size:12px; }
+.version-history { list-style:none; padding:0; margin:24px 0; }
+.version-history > li { padding:20px 0; border-top:1px solid var(--line); }
+.version-heading { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.version-heading h3 { font-size:20px; font-weight:700; }
+.version-heading time { font-size:12px; color:var(--ink-2); }
+.version-history ul { padding-left:1.3em; font-size:13px; line-height:1.9; }

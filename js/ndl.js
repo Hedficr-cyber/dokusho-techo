@@ -78,7 +78,7 @@ function parse(xml) {
       volume: text(it, 'dcndl:volume'),
       series,
       creators: texts(it, 'dc:creator'),
-      resp: [...it.children].find((n) => n.tagName === 'author')?.textContent.trim() || '', // 責任表示（海外作家のカタカナ名はここだけ）
+      resp: [...it.children].find((n) => n.tagName === 'author')?.textContent.trim() || '', // 責任表示（海外著者のカタカナ名はここだけ）
       publisher: text(it, 'dc:publisher'),
       issued: text(it, 'dcterms:issued'),
       year: year(text(it, 'dcterms:issued')),
@@ -169,7 +169,7 @@ function groupWorks(items, { includeComics = false } = {}) {
     w.keys = [...new Set(w.editions.flatMap((e) => [normTitle(e.title), normTitle(mainTitle(e.title))]))];
     const order = ['上', '上巻', '前編', '前', '中', '中巻', '下', '下巻', '後編', '後'];
     w.partsLabel = w.parts.size > 1 ? `（${[...w.parts].sort((a, b) => order.indexOf(a) - order.indexOf(b)).join('・')}）` : '';
-    // 海外作家は dc:creator がローマ字なので、責任表示のカタカナ名を優先する
+    // 海外著者は dc:creator がローマ字なので、責任表示のカタカナ名を優先する
     const latin = /^[A-Za-z]/.test(w.creators[0] || '');
     w.authorLabel = (latin && respAuthor(w.resp)) || w.creators.map(cleanCreator).filter(Boolean).slice(0, 2).join('、');
     w.isLit = /^9/.test(w.ndc || '');
@@ -198,7 +198,7 @@ export async function searchIsbn(isbn) {
   return groupWorks(items.filter((it) => it.isbn === isbn), { includeComics: true })[0] || null;
 }
 
-// フォロー中の作家の新刊・近刊（出版社の近刊情報も含む）。新刊チェックは 6 時間だけ結果を使い回す
+// フォロー中の著者の新刊・近刊（出版社の近刊情報も含む）。新刊チェックは 6 時間だけ結果を使い回す
 export async function searchReleases(name, fromMonth) {
   const items = await query({ creator: name, from: fromMonth, cnt: 60, dpid: null }, { ttl: 6 * 3600 * 1000 });
   const own = items.filter((it) => it.creators.some((c) => authorMatches(c, name))
@@ -208,8 +208,8 @@ export async function searchReleases(name, fromMonth) {
     .sort((a, b) => b.lastMonth.localeCompare(a.lastMonth));
 }
 
-export async function searchTitle(title, author = '') {
-  const params = { title, cnt: 40 };
+export async function searchTitle(title, author = '', {allSources=false}={}) {
+  const params = { title, cnt: 40, ...(allSources ? {dpid:null} : {}) };
   if (author) params.creator = author;
   const items = await query(params);
   const q = normTitle(title);
@@ -217,8 +217,8 @@ export async function searchTitle(title, author = '') {
   return groupWorks(items).sort((a, b) => exact(a) - exact(b) || b.firstYear - a.firstYear);
 }
 
-// 書名・作者・出版社などすべての項目から探す。NDL は書名の五十音順で返すので、
-// 書名が一致する本 → 書名に含む本 → 作者が一致する本 → その他 の順に並べ直す
+// 書名・著者・出版社などすべての項目から探す。NDL は書名の五十音順で返すので、
+// 書名が一致する本 → 書名に含む本 → 著者が一致する本 → その他 の順に並べ直す
 export async function searchAny(q) {
   const items = await query({ any: q, cnt: 60 });
   const tq = normTitle(q);

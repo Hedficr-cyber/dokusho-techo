@@ -26,7 +26,7 @@ export function load() {
   return state;
 }
 
-function save() {
+function save(type='change') {
   state.updatedAt = new Date().toISOString();
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -35,7 +35,7 @@ function save() {
     listeners.forEach((fn) => fn({ type: 'save-error' }));
     return;
   }
-  listeners.forEach((fn) => fn({ type: 'change' }));
+  listeners.forEach((fn) => fn({ type }));
 }
 
 export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
@@ -115,9 +115,20 @@ export function prepareBackup(data) {
   if (new Set(data.books.map((b) => b.id)).size !== data.books.length) invalid();
   if ((data.follows || []).some((f) => !f || typeof f.name !== 'string' || typeof f.lastChecked !== 'string')) invalid();
   if ((data.releases || []).some((r) => !r || ['key', 'title', 'author', 'month'].some((k) => typeof r[k] !== 'string'))) invalid();
+  // バックアップの任意項目も型を確認。文字列の代わりにオブジェクトが来ると表示を壊す。
+  const optionalStrings=(obj,keys)=>keys.every(k=>obj[k]==null || typeof obj[k]==='string');
+  const optionalNumbers=(obj,keys)=>keys.every(k=>obj[k]==null || (typeof obj[k]==='number' && Number.isFinite(obj[k])));
+  const stringArray=(obj,key)=>obj[key]==null || (Array.isArray(obj[key]) && obj[key].every(x=>typeof x==='string'));
+  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading'];
+  if (data.books.some(b=>!optionalStrings(b,bookStrings) || !optionalNumbers(b,['rating','priority'])
+    || !stringArray(b,'genres') || !stringArray(b,'coverIsbns')
+    || (b.photos!=null && (!Array.isArray(b.photos) || b.photos.some(x=>!Number.isInteger(x)))))) invalid();
+  if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt']) || !stringArray(r,'coverIsbns'))) invalid();
+  if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt']))) invalid();
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
   if (Object.entries(data.readLog || {}).some(([d, ids]) => !isDate(d) || !Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) invalid();
   if ((data.manualReadDays || []).some((d) => !isDate(d))) invalid();
+  if (data.books.some(b=>b.year!=null && !['string','number'].includes(typeof b.year))) invalid();
   const next = { ...structuredClone(EMPTY), ...structuredClone(data) };
   // v0.2.0 の空配列は「本を指定せずに読んだ日」の印。
   if (!('manualReadDays' in data)) next.manualReadDays = Object.keys(next.readLog).filter((d) => !next.readLog[d].length);
@@ -173,8 +184,10 @@ export function addReleases(name, items) {
 export function updateReleaseCovers(key,patch) {
   const item=state.releases.find(r=>r.key===key);
   if (!item) return;
+  if (!item.isbn && patch.isbn) item.isbn=patch.isbn;
+  if (!item.publishedAt && patch.publishedAt) item.publishedAt=patch.publishedAt;
   Object.assign(item,{coverIsbns:patch.coverIsbns,coverIsbn:patch.coverIsbn,coverCheckedAt:patch.coverCheckedAt,coverLookupVersion:patch.coverLookupVersion});
-  save();
+  save('release-covers');
 }
 
 export function markReleasesSeen() {

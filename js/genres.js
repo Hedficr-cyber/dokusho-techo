@@ -16,6 +16,7 @@ export const SOURCES = {
   search: '著者・ジャンル検索から',
   scan: 'バーコードで登録',
   release: '新刊通知から',
+  series: 'シリーズの続きから',
   manual: '自分で追加',
 };
 

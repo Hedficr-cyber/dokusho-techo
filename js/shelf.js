@@ -2,7 +2,7 @@ import { compareAuthors } from './authors.js';
 import { GENRE_GROUPS, GENRE_GROUP_BY_ID } from './genres.js';
 export const SHELF_MODES = [
   ['author','著者順','著者の五十音順'], ['added','登録順','新しく登録した順'],
-  ['year','刊行順','刊行の新しい順'], ['genre','ジャンル','ジャンル別'],
+  ['year','刊行順','刊行の新しい順'], ['genre','ジャンル','ジャンル別'], ['series','シリーズ','シリーズの続き'],
 ];
 export function primaryGenre(book) {
   for (const id of book.genres || []) {

@@ -87,12 +87,16 @@ export function formatFromSeries(series) {
 }
 
 // 刊行年月を「2026-10」の形にそろえる（dc:date「2026-10」、issued「2026.10」「2026年10月」など）
+// dc:date が「2023」、issued が「2023.12」のように片方だけ月があるときは、月まで分かる方を使う
 export function pubMonth(...candidates) {
+  let yearOnly = '';
   for (const c of candidates) {
-    const m = String(c ?? '').match(/(\d{4})\D{0,2}(\d{1,2})?/);
-    if (m) return m[2] && Number(m[2]) >= 1 && Number(m[2]) <= 12 ? `${m[1]}-${m[2].padStart(2, '0')}` : m[1];
+    const m = String(c ?? '').normalize('NFKC').match(/(\d{4})\D{0,2}(\d{1,2})?/);
+    if (!m) continue;
+    if (m[2] && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${m[1]}-${m[2].padStart(2, '0')}`;
+    yearOnly ||= m[1];
   }
-  return '';
+  return yearOnly;
 }
 
 // 新刊として扱ってよい記録：ISBN がある本か、国会図書館の所蔵（R100000002）・出版社の近刊情報（R100000137）。

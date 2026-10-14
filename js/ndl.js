@@ -10,8 +10,10 @@ const BASE = 'https://ndlsearch.ndl.go.jp/api/opensearch';
 const GAP_MS = 1200;
 const TIMEOUT_MS = 9000; // 止まった問い合わせは、やり直すと1〜3秒で返ることが多い
 const TTL_MS = 7 * 24 * 3600 * 1000;
-const CACHE_PREFIX = 'ndl:';
+// v0.9 で刊行月（「2023.12」）の読み取りを直したので、以前の保存分（ndl:）は使わずに消す
+const CACHE_PREFIX = 'ndl2:';
 const CACHE_MAX = 150;
+try { Object.keys(localStorage).filter((k) => k.startsWith('ndl:')).forEach((k) => localStorage.removeItem(k)); } catch { /* 使えなければ何もしない */ }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let last = 0;
@@ -210,10 +212,10 @@ export async function searchReleases(name, fromMonth) {
     .sort((a, b) => b.lastMonth.localeCompare(a.lastMonth));
 }
 
-export async function searchTitle(title, author = '', {allSources=false}={}) {
-  const params = { title, cnt: 40, ...(allSources ? {dpid:null} : {}) };
+export async function searchTitle(title, author = '', {allSources=false, ttl=TTL_MS, cnt=40}={}) {
+  const params = { title, cnt, ...(allSources ? {dpid:null} : {}) };
   if (author) params.creator = author;
-  const items = await query(params);
+  const items = await query(params, { ttl });
   const q = normTitle(title);
   const exact = (w) => (w.keys.includes(q) ? 0 : 1);
   return groupWorks(items).sort((a, b) => exact(a) - exact(b) || b.firstYear - a.firstYear);

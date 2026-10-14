@@ -14,7 +14,7 @@ const observer='IntersectionObserver' in window ? new IntersectionObserver(entri
 },{threshold:0.08,rootMargin:'0px 0px -72px 0px'}) : null;
 export function revealBooks(root) {
   for (const e of observed) if (!e.isConnected) {observer?.unobserve(e);observed.delete(e);}
-  for (const e of root.querySelectorAll('.book')) {
+  for (const e of root.querySelectorAll('.book, .series-card, .cal-reveal')) {
     e.classList.add('reveal-item');
     if (reduced.matches || !observer || seen.has(keyOf(e))) show(e);
     else if (!observed.has(e)) {observed.add(e);observer.observe(e);}

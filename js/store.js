@@ -12,6 +12,7 @@ const EMPTY = {
   manualReadDays: [], // 本棚の「今日読んだ」で記録した日。本ごとの記録を取り消しても残す
   readLog: {},      // 読んだ日 { 'YYYY-MM-DD': [本の id ...] }
   goals: {},        // 年間目標 { '2026': 50 }
+  seriesCheckedAt: '', // 本棚のシリーズの新しい巻を最後に確かめた時刻
 };
 let state = structuredClone(EMPTY);
 const listeners = new Set();
@@ -21,7 +22,8 @@ export function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) state = prepareBackup(JSON.parse(raw));
     // v0.7 までに点字版などの記録から新刊として拾ったもの（例：恋のゴンドラ）を外す
-    state.releases = state.releases.filter(isPrintRecord);
+    // 本棚のシリーズの巻は、点字版の記録しかなくても続巻として残す（シリーズ側で古い巻を除いている）
+    state.releases = state.releases.filter((r) => r.series || isPrintRecord(r));
   } catch {
     /* 読めないときは空の本棚で始める */
   }
@@ -125,8 +127,8 @@ export function prepareBackup(data) {
   if (data.books.some(b=>!optionalStrings(b,bookStrings) || !optionalNumbers(b,['rating','priority'])
     || !stringArray(b,'genres') || !stringArray(b,'coverIsbns')
     || (b.photos!=null && (!Array.isArray(b.photos) || b.photos.some(x=>!Number.isInteger(x)))))) invalid();
-  if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt']) || !stringArray(r,'coverIsbns'))) invalid();
-  if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt']))) invalid();
+  if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt','series']) || !stringArray(r,'coverIsbns'))) invalid();
+  if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt']) || (f.auto!=null && typeof f.auto!=='boolean'))) invalid();
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
   if (Object.entries(data.readLog || {}).some(([d, ids]) => !isDate(d) || !Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) invalid();
   if ((data.manualReadDays || []).some((d) => !isDate(d))) invalid();
@@ -148,38 +150,73 @@ export const follows = () => state.follows;
 export const isFollowing = (name) => state.follows.some((f) => normName(f.name) === normName(name));
 
 export function follow(name) {
-  if (!name || isFollowing(name)) return;
+  if (!name) return;
+  const f = state.follows.find((x) => normName(x.name) === normName(name));
+  if (f?.auto) { delete f.auto; save(); return; } // 本棚から外れてもフォローを残す
+  if (f) return;
   state.follows.push({ name, addedAt: today(), lastChecked: '' });
   save();
 }
 
+// 本棚の著者は自動でフォローする（auto: true）。本棚から著者の本がなくなったら、自動の分だけ外す。
+// 自分でフォローした著者（auto なし）はそのまま。変わったら true
+export function syncShelfFollows(names) {
+  const want = new Map(names.filter(Boolean).map((n) => [normName(n), n]));
+  const before = JSON.stringify(state.follows);
+  for (const [key, name] of want) {
+    if (!state.follows.some((f) => normName(f.name) === key)) state.follows.push({ name, addedAt: today(), lastChecked: '', auto: true });
+  }
+  state.follows = state.follows.filter((f) => !f.auto || want.has(normName(f.name)));
+  if (JSON.stringify(state.follows) === before) return false;
+  state.releases = state.releases.filter((r) => r.series || state.follows.some((f) => normName(f.name) === normName(r.author)));
+  save('follows');
+  return true;
+}
+
 export function unfollow(name) {
   state.follows = state.follows.filter((f) => normName(f.name) !== normName(name));
-  state.releases = state.releases.filter((r) => normName(r.author) !== normName(name));
+  // 本棚のシリーズの新しい巻は、フォローをやめても残す
+  state.releases = state.releases.filter((r) => normName(r.author) !== normName(name) || r.series);
   save();
 }
 
 export const releases = () => state.releases;
 
-// 新刊チェックの結果を足す。もう知っている本・「表示しない」にした本は足さない。新しく見つかった件数を返す
-export function addReleases(name, items) {
-  if (!isFollowing(name)) return 0;
+function mergeReleases(items) {
   const have = new Set(state.releases.map((r) => r.key));
   const gone = new Set(state.dismissed);
   const fresh = items.filter((r) => !have.has(r.key) && !gone.has(r.key));
   state.releases.push(...fresh.map((r) => ({ ...r, foundAt: today(), seen: false })));
-  // 前に見つけた本も、あとから ISBN が登録されたり別の版の表紙が見つかったりしたら書き足す
+  // 前に見つけた本も、あとから ISBN・発売日が登録されたり別の版の表紙が見つかったりしたら書き足す
   for (const it of items) {
     const old = state.releases.find((r) => r.key === it.key);
     if (!old || fresh.includes(it)) continue;
     if (!old.isbn && it.isbn) old.isbn = it.isbn;
+    if (!old.publishedAt && it.publishedAt) old.publishedAt = it.publishedAt;
+    if (!old.series && it.series) old.series = it.series;
     if (it.coverLookupVersion) Object.assign(old,{coverIsbns:it.coverIsbns,coverIsbn:it.coverIsbn,coverCheckedAt:it.coverCheckedAt,coverLookupVersion:it.coverLookupVersion});
     else if (!old.coverIsbn && it.coverIsbn) old.coverIsbn = it.coverIsbn;
   }
+  return fresh.length;
+}
+
+// 新刊チェックの結果を足す。もう知っている本・「表示しない」にした本は足さない。新しく見つかった件数を返す
+export function addReleases(name, items) {
+  if (!isFollowing(name)) return 0;
+  const n = mergeReleases(items);
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f) f.lastChecked = new Date().toISOString();
-  save();
-  return fresh.length;
+  save('releases'); // 裏の新刊確認。本棚の画面は描き直さない
+  return n;
+}
+
+// 本棚のシリーズの、まだ持っていない新しい巻・発売予定の巻（フォローしていない著者でも出す）
+export const seriesCheckedAt = () => state.seriesCheckedAt || '';
+export function addSeriesReleases(items) {
+  const n = mergeReleases(items.map((r) => ({ ...r, series: r.series || r.baseTitle || r.title })));
+  state.seriesCheckedAt = new Date().toISOString();
+  save('releases');
+  return n;
 }
 
 // 表紙の補充だけを保存。既読状態/新刊件数/フォローの確認時刻は変えない。
@@ -195,7 +232,7 @@ export function updateReleaseCovers(key,patch) {
 export function markReleasesSeen() {
   if (!state.releases.some((r) => !r.seen)) return;
   state.releases.forEach((r) => { r.seen = true; });
-  save();
+  save('releases');
 }
 
 export function dismissRelease(key) {

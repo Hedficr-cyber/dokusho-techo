@@ -459,3 +459,96 @@ body.sheet-locked .topbar { position:fixed; top:0; left:0; right:0; }
 .tab-glider.no-anim { transition:none; }
 @media(prefers-reduced-motion:reduce) { .tab-glider { transition:none; } }
 @media(forced-colors:active) { .tab-glider { display:none; } }
+/* 本棚：シリーズの続き。巻の丸は 読了＝塗り、本棚＝線、まだ本棚にない＝点線、発売予定＝点線＋点 */
+.series-list { list-style:none; margin:0; padding:0; display:grid; gap:14px; }
+.series-card { padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--surface); }
+.series-head { display:flex; gap:15px; align-items:flex-start; }
+.series-main { flex:1; min-width:0; }
+.series-title { font-size:17px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+.series-author { display:inline-flex; min-height:32px; align-items:center; font-size:13px; color:var(--ink-2); }
+.series-progress { font-size:13px; color:var(--ink-2); margin:2px 0 8px; }
+.series-progress b { color:var(--ink); font-size:15px; }
+.series-bar { height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
+.series-bar i { display:block; height:100%; background:var(--ink); border-radius:2px; transition:width .5s ease; }
+.series-vols { list-style:none; margin:16px 0 0; padding:0; display:flex; flex-wrap:wrap; gap:7px; }
+.vol { display:inline-flex; align-items:center; justify-content:center; min-width:36px; height:36px; padding:0 6px; border-radius:18px; font-size:13px; font-weight:600; border:1.5px solid var(--ink); background:transparent; color:var(--ink); position:relative; }
+button.vol { min-width:44px; height:44px; border-radius:22px; }
+.vol-done { background:var(--ink); color:var(--paper); }
+.vol-missing { border-style:dashed; border-color:var(--ink-2); color:var(--ink-2); font-weight:500; }
+.vol-coming { border-style:dotted; border-color:var(--ink-2); color:var(--ink-2); font-weight:500; }
+.vol-coming::after { content:''; position:absolute; top:4px; right:4px; width:6px; height:6px; border-radius:50%; background:var(--ink); }
+.series-next { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); font-size:13px; line-height:1.7; }
+.series-next p { margin:0; }
+.series-next b { font-size:14px; }
+.series-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:16px 2px 4px; font-size:11px; color:var(--ink-2); }
+.series-legend span { display:inline-flex; align-items:center; gap:6px; }
+.series-legend .vol { min-width:14px; width:14px; height:14px; padding:0; border-radius:50%; }
+.series-legend .vol-coming::after { top:3px; right:3px; width:4px; height:4px; }
+.series-note { color:var(--ink-2); font-size:12px; }
+.series-card.reveal-item { opacity:0; transform:translateY(22px); transition:opacity .6s cubic-bezier(.2,.65,.3,1),transform .6s cubic-bezier(.2,.65,.3,1); }
+.series-card.reveal-item.is-revealed { opacity:1; transform:none; }
+@media(prefers-reduced-motion:reduce) { .series-card.reveal-item { opacity:1; transform:none; transition:none; } }
+/* 入力中（キーボード表示中）は下のナビを隠す */
+body.typing .tabbar { opacity:0; visibility:hidden; pointer-events:none; transform:translateX(-50%) translateY(16px); transition:opacity .15s,transform .15s,visibility 0s .15s; }
+/* 著書：新刊・持っていない本・カレンダー */
+.cover.xs { width:30px; height:44px; border-radius:2px; box-shadow:0 1px 3px #00000018; }
+.cover.xs .spine-t { font-size:6px; padding:2px; -webkit-line-clamp:3; }
+.back-link { display:inline-flex; align-items:center; min-height:44px; margin-bottom:6px; color:var(--ink-2); font-size:14px; }
+.release-list .group-head { margin-top:10px; }
+.unowned-author { margin:22px 0 8px; padding-top:18px; border-top:1px solid var(--line); }
+.unowned-author:first-of-type { border-top:0; padding-top:4px; }
+.unowned-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.unowned-name { font-size:17px; font-weight:700; color:var(--ink); min-height:44px; }
+.unowned-head span { font-size:12px; color:var(--ink-2); }
+.more-works { margin-top:6px; }
+.unowned-more { text-align:center; min-height:40px; padding:12px 0; }
+.follow-btn.auto { cursor:default; font-size:12px; }
+
+.cal-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:6px 0 14px; }
+.cal-switch { display:inline-flex; padding:4px; gap:4px; border-radius:22px; background:rgba(232,232,238,.64); border:1px solid var(--glass-edge); }
+.cal-switch button { min-width:64px; min-height:40px; border:0; border-radius:18px; background:transparent; color:var(--ink-2); font-size:13px; font-weight:600; transition:background .2s,color .2s,box-shadow .2s; }
+.cal-switch button.on { background:var(--surface); color:var(--ink); box-shadow:0 2px 7px #24242714,inset 0 1px 0 #ffffff9c; }
+.cal-nav { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+.cal-nav h2 { font-size:18px; font-weight:700; }
+.cal-nav .icon-btn { width:44px; height:44px; font-size:24px; line-height:1; border-radius:22px; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; }
+.cal-dow { text-align:center; font-size:11px; color:var(--ink-2); padding:4px 0 6px; }
+.cal-dow.sun, .cal-cell.sun .cal-num { color:#b0333c; }
+.cal-cell { min-height:62px; border-radius:10px; background:var(--surface); display:flex; flex-direction:column; align-items:center; padding:4px 2px; position:relative; }
+.cal-cell.blank { background:transparent; }
+.cal-num { font-size:12px; font-weight:600; line-height:1.2; }
+.cal-cell.today .cal-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--ink); color:var(--paper); }
+.cal-cell.has { background:var(--surface); box-shadow:inset 0 0 0 1.5px var(--ink); }
+.cal-day { width:100%; height:100%; min-height:56px; display:flex; flex-direction:column; align-items:center; gap:3px; border:0; padding:0; background:transparent; color:inherit; }
+.cal-day .cover.xs { width:26px; height:38px; }
+.cal-count { position:absolute; right:3px; bottom:3px; font-size:10px; font-weight:700; background:var(--ink); color:var(--paper); border-radius:8px; padding:0 4px; line-height:16px; }
+.cal-month-list, .cal-undated { margin-top:22px; }
+.cal-month-list h3, .cal-undated h3 { font-size:14px; font-weight:700; margin-bottom:8px; }
+.cal-month-list ul, .cal-undated ul { list-style:none; margin:0; padding:0; }
+.cal-month-list li { display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
+.cal-undated li { border-bottom:1px solid var(--line); }
+.cal-date { width:42px; flex-shrink:0; font-size:15px; font-weight:700; text-align:center; }
+.cal-date small { display:block; font-size:10px; font-weight:500; color:var(--ink-2); }
+.cal-line { flex:1; min-width:0; display:flex; align-items:center; gap:12px; min-height:56px; padding:6px 0; border:0; background:transparent; color:inherit; text-align:left; }
+.cal-line-main { min-width:0; display:flex; flex-direction:column; }
+.cal-line-title { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cal-line-author { font-size:12px; color:var(--ink-2); }
+.cal-empty { margin-top:18px; }
+.cal-week { list-style:none; margin:0; padding:0; }
+.cal-week-day { display:flex; gap:14px; padding:10px 0; border-bottom:1px solid var(--line); min-height:64px; }
+.cal-week-date { width:42px; flex-shrink:0; text-align:center; padding-top:4px; }
+.cal-week-date b { display:block; font-size:20px; line-height:1.1; }
+.cal-week-date span { font-size:11px; color:var(--ink-2); }
+.cal-week-day.sun .cal-week-date { color:#b0333c; }
+.cal-week-day.today .cal-week-date b { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:50%; background:var(--ink); color:var(--paper); font-size:17px; }
+.cal-week-books { flex:1; min-width:0; display:flex; flex-direction:column; }
+.cal-none { color:var(--ink-2); padding-top:8px; }
+.day-books { list-style:none; margin:0; padding:0; display:grid; gap:22px; }
+.day-book { display:flex; gap:16px; align-items:flex-start; }
+.day-book-main { flex:1; min-width:0; }
+.day-book-main h3 { font-size:17px; font-weight:700; line-height:1.45; }
+.day-book-main .book-author { margin:4px 0 6px; }
+.day-synopsis { font-size:13px; line-height:1.85; color:var(--ink); margin:8px 0 10px; }
+.day-book .row { gap:8px; flex-wrap:wrap; }
+@media(prefers-color-scheme:dark) { .cal-switch { background:rgba(48,48,54,.7); border-color:#ffffff12; } .cal-switch button.on { background:#505057; } .cal-dow.sun, .cal-cell.sun .cal-num, .cal-week-day.sun .cal-week-date { color:#ff9aa2; } }
+.cover.xs .spine { padding:2px; border-left-width:2px; }

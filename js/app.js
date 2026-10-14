@@ -12,6 +12,7 @@ import {
 
 import { loadBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
+import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries } from './series.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
 const $ = (s, el = document) => el.querySelector(s);
@@ -51,12 +52,23 @@ function placeGlider(animate = true) {
 }
 window.addEventListener('resize', () => placeGlider(false));
 
+// 文字を入力している間（iPhone ではキーボードが出ている間）は、下のナビを隠す。
+// キーボードの上に押し上げられたナビが検索欄にかぶるため
+const isTypingField = (el) => el?.matches?.('input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=button]):not([type=submit]), textarea, [contenteditable="true"]');
+document.addEventListener('focusin', (e) => { if (isTypingField(e.target)) document.body.classList.add('typing'); });
+document.addEventListener('focusout', (e) => {
+  if (!isTypingField(e.target)) return;
+  // 次の入力欄へ移るときは隠したまま
+  setTimeout(() => { if (!isTypingField(document.activeElement)) document.body.classList.remove('typing'); }, 60);
+});
+
 // ---------------------------------------------------------------- 画面の状態（この端末だけで覚える）
 const UI_KEY = 'dokusho-techo:ui';
 const ui = {
   q: '', sort: 'author', genre: '', unreadOnly: true, notOnShelf: false, showOther: false, showAntho: false,
   bookView: 'grid', historyYear: 'all', yearDirection: 'desc', addedDirection: 'desc',
   searchQ: '', searchKind: 'all', recShift: 0,
+  authorMode: 'new', calView: 'month', calMonth: '', calWeek: '',
 };
 delete ui.scanStatus; // v0.7 で「入れる棚」の選択をやめた（登録はすべて本棚へ）
 delete ui.addStatus;
@@ -77,7 +89,7 @@ function stopShelfLoading() {
   cancelAnimationFrame(shelfFrame);
 }
 let preview = null; // 外部の本の情報。閉じたら通信も中止する
-function stopBookPreview() { preview?.controller.abort(); preview=null; }
+function stopBookPreview() { preview?.controller.abort(); preview=null; daySheet?.controller.abort(); daySheet=null; }
 let openId = null;          // 詳細を開いている本
 let workCache = new Map();  // 検索結果の作品（key → work）
 let lastAuthor = null;      // 直近の著者検索（再描画で読み込み表示を挟まないため）
@@ -88,7 +100,7 @@ let scanned = [];           // このバーコード画面で読み取った本
 const pendingReleaseNames = new Set(); // チェック中に追加したフォローも順に確認する
 let checking = null;        // 新刊チェックの進み { done, total }
 let checkError = '';
-let newKeys = new Set();    // 著者タブを開いた時点で未読だった新刊（NEW 表示用）
+let newKeys = new Set();    // 著書タブを開いた時点で未読だった新刊（NEW 表示用）
 let lastSearch = null;      // 検索タブの直近の結果 { q, kind, works, error }
 let searchSeq = 0;          // 何回目の検索か（最新の結果だけを描くため）
 let recState = null;        // おすすめの集まり具合 { sig, plan, results, running, error }
@@ -279,6 +291,7 @@ function watchShelfEnd(list) {
 }
 function renderShelf() {
   stopShelfLoading();
+  if (ui.sort==='series') { renderSeriesShelf(); return; }
   const all=store.books();
   const q=normName(ui.q);
   const list=sortShelfBooks(all.filter(b=>(!ui.genre || belongsToGenre(b,ui.genre))
@@ -314,6 +327,149 @@ function renderShelf() {
 function emptyShelf(total) {
   if (!total) return `<div class="empty"><p class="empty-title">本棚はまだ空です</p><p>右上の「本を追加」から、次に読みたい本を入れてみましょう。</p></div>`;
   return `<div class="empty"><p class="empty-title">条件に合う本がありません</p><p>ジャンルを切り替えるか、検索の文字を消してください。</p></div>`;
+}
+
+// ---------------------------------------------------------------- 本棚：シリーズの続き
+const SERIES_TTL = 12 * 3600 * 1000;
+const seriesFetched = new Map(); // シリーズの key → 国会図書館で確かめた巻（この起動中だけ覚える）
+const seriesFailed = new Set();
+let seriesLoading = null;
+const VOL_STATE = { done: '読了', shelf: '本棚にあり', missing: 'まだ本棚にない', coming: '発売予定' };
+const volState = (v) => (v.book ? (v.book.status === 'done' ? 'done' : 'shelf') : v.upcoming ? 'coming' : 'missing');
+const releaseDay = (v) => (v.publishedAt ? publicationLabel(v.publishedAt) : monthLabel(v.month));
+
+function seriesList() {
+  const q = normName(ui.q);
+  return shelfSeries(store.books()).map((s) => describeSeries(s, seriesFetched.get(s.key)))
+    .filter(isRealSeries)
+    .filter((d) => !q || normName(`${d.base}${d.author}`).includes(q))
+    .sort((a, b) => Number(!a.next) - Number(!b.next) || a.base.localeCompare(b.base, 'ja'));
+}
+
+function seriesCard(d) {
+  const lead = d.next || d.vols[d.vols.length - 1];
+  const leadCover = lead.book ? cover(lead.book.title, lead.book.isbn, 's', lead.book.coverIsbns || lead.book.coverIsbn || [], d.author)
+    : cover(lead.title, lead.isbn, 's', lead.coverIsbns || [], d.author);
+  const chips = d.vols.map((v) => {
+    const st = volState(v);
+    return `<li><button type="button" class="vol vol-${st}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${v.vol}巻：${VOL_STATE[st]}">${v.vol}</button></li>`;
+  }).join('');
+  const n = d.next;
+  let next = '';
+  if (!n) next = `<b>全巻読了</b>`;
+  else if (n.book) next = `次に読む：<b>${n.vol}巻</b>（本棚にあり）`;
+  else if (n.upcoming) next = `次の巻：<b>${n.vol}巻</b> ${esc(releaseDay(n))}発売予定`;
+  else next = `次に読む：<b>${n.vol}巻</b>（まだ本棚にない）`;
+  const latest = d.coming.find((v) => v !== n);
+  const action = n && !n.book && n.work ? `<button type="button" class="add-btn" data-act="series-add" data-key="${esc(d.key)}" data-vol="${n.vol}">＋登録</button>`
+    : n?.book ? `<button type="button" class="ghost small" data-act="open" data-id="${esc(n.book.id)}">開く</button>` : '';
+  return `<li class="series-card" data-reveal-key="${esc(`series:${d.key}`)}">
+    <div class="series-head">${leadCover}
+      <div class="series-main">
+        <h2 class="series-title">${esc(d.base)}</h2>
+        <button type="button" class="link series-author" data-act="author" data-name="${esc(d.author)}">${esc(d.author)}</button>
+        <p class="series-progress">読了 <b>${d.done}</b> / ${d.total}巻</p>
+        <div class="series-bar" aria-hidden="true"><i style="width:${d.total ? Math.round((d.done / d.total) * 100) : 0}%"></i></div>
+      </div>
+    </div>
+    <ol class="series-vols" aria-label="${esc(d.base)}の巻">${chips}</ol>
+    <div class="series-next"><p>${next}${latest ? `<br><span class="muted">最新刊：${latest.vol}巻 ${esc(releaseDay(latest))}発売予定</span>` : ''}</p>${action}</div>
+  </li>`;
+}
+
+function drawSeries() {
+  const box = $('#series-list');
+  if (!box) return;
+  const list = seriesList();
+  $('#series-count').textContent = `${list.length}シリーズ`;
+  box.innerHTML = `${seriesLoading ? loading(`シリーズの巻を国立国会図書館で確かめています（${seriesLoading.total}件中${seriesLoading.done}件）…`) : ''}
+    ${list.length ? `<ul class="series-list">${list.map(seriesCard).join('')}</ul>
+      <p class="series-legend"><span><i class="vol vol-done"></i>読了</span><span><i class="vol vol-shelf"></i>本棚</span><span><i class="vol vol-missing"></i>まだ本棚にない</span><span><i class="vol vol-coming"></i>発売予定</span></p>`
+    : seriesLoading ? '' : `<div class="empty"><p class="empty-title">シリーズの本が見つかりません</p><p>書名の最後に巻数がある本（例：「変な家2」「invert 2」）をシリーズとしてまとめます。</p></div>`}
+    ${seriesFailed.size && !seriesLoading ? errorBox('一部のシリーズは国立国会図書館に接続できず、本棚にある巻だけを表示しています。') : ''}
+    <p class="source">本棚の本と国立国会図書館サーチの書誌から、同じ著者・同じ書名の巻を数えています。</p>`;
+  revealBooks(box);
+}
+
+function renderSeriesShelf() {
+  view.innerHTML = `<section class="shelf shelf-sort-series">
+    ${pageHead('本棚', `${store.books().length}冊`)}
+    <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
+      ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
+    </div>
+    <label class="search-wrap shelf-search">${icon('search')}<span class="sr-only">シリーズを検索</span><input id="shelf-q" type="search" placeholder="シリーズを検索" value="${esc(ui.q)}" autocomplete="off"></label>
+    <div class="shelf-bar"><div class="shelf-caption"><span>シリーズの続き</span><p class="count" id="series-count" aria-live="polite"></p></div></div>
+    <div id="series-list"></div>
+  </section>`;
+  drawSeries();
+  loadSeriesVolumes();
+}
+
+// 本棚の各シリーズについて、国会図書館で他の巻と発売予定を 1 件ずつ確かめる（画面を離れたら止める）
+// 読み込み中に本棚が変わって描き直しても、読み込みは 1 本だけ動かす（2 本目を始めると数え方が壊れる）
+let seriesRun = null;
+function loadSeriesVolumes() {
+  if (seriesRun) return seriesRun;
+  const todo = shelfSeries(store.books()).filter((s) => !seriesFetched.has(s.key));
+  if (!todo.length) return Promise.resolve();
+  seriesFailed.clear();
+  const state = { done: 0, total: todo.length };
+  seriesLoading = state;
+  drawSeries();
+  seriesRun = (async () => {
+    for (const s of todo) {
+      if (route.name !== 'shelf' || ui.sort !== 'series') break; // 画面を離れたら止め、戻ったら続きから
+      if (!seriesFetched.has(s.key)) {
+        try {
+          const works = await ndl.searchTitle(s.base, s.author, { allSources: true, ttl: SERIES_TTL });
+          seriesFetched.set(s.key, seriesVolumesFromWorks(s, works));
+        } catch { seriesFailed.add(s.key); }
+      }
+      state.done += 1;
+      drawSeries();
+    }
+  })().finally(() => {
+    if (seriesLoading === state) seriesLoading = null;
+    seriesRun = null;
+    drawSeries();
+  });
+  return seriesRun;
+}
+
+function findSeriesVol(key, vol) {
+  const s = shelfSeries(store.books()).find((x) => x.key === key);
+  return s ? describeSeries(s, seriesFetched.get(s.key)).vols.find((v) => v.vol === Number(vol)) : null;
+}
+
+// シリーズの新しい巻（最後の巻より後に出た・これから出る巻）を、著書タブの新着とカレンダーに出す。12 時間ごと
+async function checkSeries() {
+  const last = Date.parse(store.seriesCheckedAt() || '');
+  if (last && Date.now() - last < SERIES_TTL) return;
+  const from = monthsAgo(2);
+  const items = [];
+  for (const s of shelfSeries(store.books())) {
+    let vols;
+    try {
+      vols = seriesVolumesFromWorks(s, await ndl.searchTitle(s.base, s.author, { allSources: true, ttl: SERIES_TTL }));
+    } catch { return; } // 通信できなければ次に開いたとき
+    seriesFetched.set(s.key, vols);
+    const d = describeSeries(s, vols);
+    if (!isRealSeries(d)) continue;
+    const fresh = (v) => v.upcoming || (v.month.length > 4 && v.month >= from);
+    // 点字版などの古い巻を新刊と誤らないよう、すでに出ている巻のうち最後の巻より後ろだけを知らせる
+    const knownMax = Math.max(0, ...d.vols.filter((v) => !fresh(v)).map((v) => v.vol));
+    for (const v of d.vols) {
+      if (v.book || !v.work || !fresh(v) || v.vol <= knownMax) continue;
+      items.push({
+        key: `${normTitle(v.work.main + (v.work.volume || ''))}|${normName(s.author)}`,
+        title: v.title, baseTitle: s.base, volume: v.work.volume || '', author: s.author, month: v.month,
+        publishedAt: v.publishedAt, publisher: v.publisher, isbn: v.isbn, link: v.link, ndc: v.ndc,
+        coverIsbns: v.coverIsbns, coverIsbn: v.coverIsbns[0] || '', series: s.base,
+      });
+    }
+  }
+  const n = store.addSeriesReleases(items);
+  if (n) toast(`本棚のシリーズに新しい巻が${n}冊あります（著書タブ・カレンダー）`);
 }
 
 // ---------------------------------------------------------------- 本の詳細
@@ -629,12 +785,14 @@ async function handleIsbn(isbn) {
   drawScanned();
 }
 
-// ---------------------------------------------------------------- 著者で探す
+// ---------------------------------------------------------------- 著書：本棚の著者の新刊・持っていない本・発売日カレンダー
+// 本棚にある本の著者は自動でフォローする（store.syncShelfFollows）。著者を名前で探すのは「検索」タブの役目
 function authorCounts() {
   const m = new Map();
   for (const b of store.books()) if (b.author) m.set(b.author, (m.get(b.author) || 0) + 1);
   return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ja'));
 }
+const isShelfAuthor = (name) => store.books().some((b) => normName(b.author) === normName(name));
 
 // ISO の時刻（世界標準時）を端末の時刻で「10/13 19:50」と表示する
 const localTime = (iso) => {
@@ -643,66 +801,272 @@ const localTime = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-const searchBar = (name) => `<form id="author-form" class="search-bar author-search" autocomplete="off">
-    <label class="search-wrap">${icon('search')}<span class="sr-only">著者名</span><input id="author-q" type="search" placeholder="著者の名前で探す" value="${esc(name)}" enterkeyhint="search"></label>
-    <button type="submit" class="primary">探す</button>
-  </form>`;
+const AUTHOR_MODES = [['new', '新刊'], ['unowned', '持っていない本'], ['calendar', 'カレンダー']];
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+const releaseDate = (r) => (r.publishedAt?.length === 10 ? r.publishedAt : '');
+const isUpcoming = (r) => { const d = releaseDate(r); return d ? d > today() : r.month > today().slice(0, 7); };
+const releaseWhen = (r) => (releaseDate(r) ? publicationLabel(releaseDate(r)) : monthLabel(r.month));
 
-// 著者タブのはじめの画面：フォロー中の著者の新刊・近刊と、本棚の著者
-function renderAuthorHome() {
-  const follows = store.follows();
-  const thisMonth = today().slice(0, 7);
-  const rel = [...store.releases()].sort((a, b) => b.month.localeCompare(a.month));
-  const shelfAuthors = authorCounts();
-  const candidates = shelfAuthors.filter(([n, c]) => c >= 2 && !store.isFollowing(n));
-  const last = follows.map((f) => f.lastChecked).filter(Boolean).sort().pop();
-  const relRow = (raw) => { const r={...raw,...confirmedRelease(raw)}; const soon=r.publishedAt ? r.publishedAt>today() : r.month>thisMonth; return `<li class="book work" data-reveal-key="${esc(`release:${r.key}`)}">
+function relRow(raw) {
+  const r = { ...raw, ...confirmedRelease(raw) };
+  const soon = isUpcoming(r);
+  return `<li class="book work" data-reveal-key="${esc(`release:${r.key}`)}">
       <button type="button" class="work-open" data-act="release-detail" data-key="${esc(r.key)}" aria-label="${esc(r.title)}の本の情報">
-        ${cover(r.title, r.isbn, 's', r.coverIsbns || r.coverIsbn || [],r.author)}
+        ${cover(r.title, r.isbn, 's', r.coverIsbns || r.coverIsbn || [], r.author)}
         <span class="book-main">
           <span class="book-title">${newKeys.has(r.key) ? '<span class="new">NEW</span>' : ''}${esc(r.title)}</span>
           <span class="book-author">${esc(r.author)}</span>
-          <span class="book-meta"><b class="${soon ? 'soon' : ''}">${esc(monthLabel(r.month))}${soon ? '発売予定' : '発売'}</b>${r.publisher ? `・${esc(r.publisher)}` : ''}</span>
-          <span class="book-meta cover-caption" ${coverCandidates(r.isbn,r.coverIsbns || r.coverIsbn || []).length || r.month<=thisMonth ? 'hidden' : ''}>表紙未取得</span>
+          <span class="book-meta"><b class="${soon ? 'soon' : ''}">${esc(releaseWhen(r))}${soon ? '発売予定' : '発売'}</b>${r.publisher ? `・${esc(r.publisher)}` : ''}</span>
+          ${r.series ? `<span class="book-meta series-note">本棚のシリーズ「${esc(r.series)}」の新しい巻</span>` : ''}
+          <span class="book-meta cover-caption" ${coverCandidates(r.isbn, r.coverIsbns || r.coverIsbn || []).length || !soon ? 'hidden' : ''}>表紙未取得</span>
         </span>
       </button>
       <div class="book-side">
         <button type="button" class="add-btn" data-act="release-add" data-key="${esc(r.key)}">＋登録</button>
         <button type="button" class="ghost small" data-act="release-dismiss" data-key="${esc(r.key)}" aria-label="この本を一覧から消す">表示しない</button>
       </div>
-    </li>`; };
-  const status = checking
-    ? loading(`フォロー中の著者の新刊を調べています（${checking.total}人中${checking.done}人）…`)
-    : `<p class="muted small">フォロー中 ${follows.length}人${last ? ` ・ 最終チェック ${esc(localTime(last))}` : ''}</p>`;
-  view.innerHTML = `
-    <section>
-      ${pageHead('著者')}
-      ${searchBar('')}
-      <h2 class="sub">新着・発売予定 <span class="muted">フォロー中の著者</span></h2>
-      ${follows.length ? `${status}${checkError && !checking ? errorBox(checkError) : ''}
-        ${rel.length ? `<ul class="books">${rel.map(relRow).join('')}</ul>`
-    : `<p class="muted">${checking ? '' : 'ここ2か月以内に出た本と、これから出る本はまだ見つかっていません。'}</p>`}
-        <div class="row"><button type="button" class="ghost small" data-act="check-releases" ${checking ? 'disabled' : ''}>今すぐ新刊をチェック</button></div>`
-    : `<p class="lead">好きな著者をフォローして、新刊をこの場所に。著者の検索結果からフォローできます。</p>`}
-      ${candidates.length ? `<div class="card follow-suggest">
-          <h3>本棚でよく読む著者</h3><p>${candidates.length}人の新刊をまとめてチェックできます。</p>
-          <p class="muted small">${candidates.slice(0, 12).map(([n]) => esc(n)).join('、')}${candidates.length > 12 ? ' ほか' : ''}</p>
-          <button type="button" class="primary" data-act="follow-shelf-authors">${candidates.length}人をフォローする</button>
-        </div>` : ''}
-      ${follows.length ? `<h3 class="sub">フォロー中の著者</h3><div class="chips wrap">${follows.map((f) => `<button type="button" class="chip following" data-act="author" data-name="${esc(f.name)}">${esc(f.name)}</button>`).join('')}</div>` : ''}
-      <h3 class="sub">本棚の著者</h3>
-      <div class="chips wrap author-chips">${shelfAuthors.slice(0, 40).map(([n, c]) => `<button type="button" class="chip" data-act="author" data-name="${esc(n)}">${esc(n)}<span class="n">${c}</span></button>`).join('') || '<p class="muted">本棚に本が入ると、ここに著者が並びます。</p>'}</div>
-      <details class="source"><summary>新刊のお知らせについて</summary><p>アプリを開いたときに新刊を確認します。書誌データは国立国会図書館サーチの出版情報を使用しています。スマホのプッシュ通知は未対応です。</p></details>
-    </section>`;
-  revealBooks(view);
+    </li>`;
 }
 
+function renderAuthorHome() {
+  const mode = AUTHOR_MODES.some(([id]) => id === ui.authorMode) ? ui.authorMode : 'new';
+  const authors = authorCounts().length;
+  view.innerHTML = `<section class="works-page works-${mode}">
+    ${pageHead('著書', authors ? `本棚の著者 ${authors}人` : '')}
+    <div class="shelf-tabs" role="group" aria-label="著書の表示">${AUTHOR_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${mode === id ? 'on' : ''}" data-act="author-mode" data-v="${id}" aria-pressed="${mode === id}">${label}</button>`).join('')}</div>
+    <div id="works-body"></div>
+  </section>`;
+  if (mode === 'unowned') drawUnowned();
+  else if (mode === 'calendar') drawCalendar();
+  else drawNewReleases();
+}
+
+// 新刊：これから出る本を発売の早い順（月ごと）、そのあとに最近出た本
+function drawNewReleases() {
+  const box = $('#works-body');
+  if (!box) return;
+  const follows = store.follows();
+  const last = follows.map((f) => f.lastChecked).filter(Boolean).sort().pop();
+  const rel = store.releases().map((r) => ({ ...r, ...confirmedRelease(r) }));
+  const when = (r) => releaseDate(r) || `${r.month}-99`;
+  const coming = rel.filter(isUpcoming).sort((a, b) => when(a).localeCompare(when(b)));
+  const out = rel.filter((r) => !isUpcoming(r)).sort((a, b) => when(b).localeCompare(when(a)));
+  let rows = '';
+  let month = '';
+  for (const r of coming) {
+    if (r.month !== month) { month = r.month; rows += `<li class="group-head"><h2>${esc(monthLabel(month))}</h2><span>発売予定</span></li>`; }
+    rows += relRow(r);
+  }
+  if (out.length) rows += `<li class="group-head"><h2>発売済み</h2><span>ここ2か月</span></li>${out.map(relRow).join('')}`;
+  const status = checking
+    ? loading(`本棚の著者の新刊を調べています（${checking.total}人中${checking.done}人）…`)
+    : `<p class="muted small">本棚の著者${follows.length ? `など ${follows.length}人` : ''}の新刊${last ? ` ・ 最終チェック ${esc(localTime(last))}` : ''}</p>`;
+  box.innerHTML = `${status}${checkError && !checking ? errorBox(checkError) : ''}
+    ${rel.length ? `<ul class="books release-list">${rows}</ul>`
+    : `<p class="muted">${checking ? '' : follows.length ? 'ここ2か月以内に出た本と、これから出る本はまだ見つかっていません。' : '本棚に本が入ると、その著者の新刊をここに出します。'}</p>`}
+    ${follows.length ? `<div class="row"><button type="button" class="ghost small" data-act="check-releases" ${checking ? 'disabled' : ''}>今すぐ新刊をチェック</button></div>` : ''}
+    <details class="source"><summary>新刊のお知らせについて</summary><p>本棚にある本の著者を自動でフォローし、アプリを開いたときに新刊を確かめます（本の多い著者から一度に30人、同じ著者は12時間ごと）。書誌データは国立国会図書館サーチの出版情報です。スマホのプッシュ通知は未対応です。</p></details>`;
+  revealBooks(box);
+}
+
+// 持っていない本：本の多い著者から順に、国会図書館で著作を調べて本棚にないものを出す（スクロールで続き）
+const UNOWNED_STEP = 4;
+const unowned = { works: new Map(), failed: new Set(), shown: UNOWNED_STEP, running: null };
+let unownedObserver = null;
+const unownedHideKey = (w, name) => `${w.key}|${normName(name)}`;
+function unownedWorks(name, works) {
+  const owned = shelfIndex();
+  const hidden = new Set(store.hiddenRecs());
+  const litShare = works.length ? works.filter((w) => w.isLit).length / works.length : 0;
+  return works.filter((w) => !w.isComic && !w.isAnthology && (litShare < 0.6 || w.isLit)
+    && !owned(w) && !hidden.has(unownedHideKey(w, name)));
+}
+function drawUnowned() {
+  const box = $('#works-body');
+  if (!box) return;
+  unownedObserver?.disconnect();
+  const authors = authorCounts();
+  const shown = authors.slice(0, unowned.shown);
+  const sections = shown.map(([name, count]) => {
+    const works = unowned.works.get(name);
+    const head = `<div class="unowned-head"><button type="button" class="link unowned-name" data-act="author" data-name="${esc(name)}">${esc(name)}</button>`;
+    if (!works) {
+      return `<section class="unowned-author">${head}<span>本棚 ${count}冊</span></div>
+        ${unowned.failed.has(name) ? `<p class="error">国立国会図書館に接続できませんでした。</p><button type="button" class="ghost small" data-act="unowned-retry">もう一度読み込む</button>` : loading('著作を調べています…')}</section>`;
+    }
+    const rows = unownedWorks(name, works);
+    rows.forEach((w) => workCache.set(w.key, w));
+    return `<section class="unowned-author">${head}<span>本棚 ${count}冊・持っていない本 ${rows.length}冊</span></div>
+      ${rows.length ? `<ul class="books">${rows.slice(0, 4).map((w) => workRow(w, null, '登録', { hideKey: unownedHideKey(w, name) })).join('')}</ul>
+        ${rows.length > 4 ? `<button type="button" class="ghost small more-works" data-act="author" data-name="${esc(name)}">ほかの${rows.length - 4}冊も見る</button>` : ''}`
+      : '<p class="muted small">持っていない本は見つかりませんでした。</p>'}
+    </section>`;
+  }).join('');
+  const allLoaded = shown.every(([name]) => unowned.works.has(name) || unowned.failed.has(name));
+  box.innerHTML = `<p class="muted small">本棚の著者の本で、まだ本棚にないもの（本棚に多い著者から）。漫画・アンソロジーは除いています。</p>
+    ${sections || '<p class="muted">本棚に本が入ると、その著者の持っていない本をここに出します。</p>'}
+    ${unowned.shown < authors.length ? `<p class="unowned-more muted small" role="status">${allLoaded ? '下へスクロールすると続きを読み込みます' : ''}</p>` : ''}
+    <p class="source">出典：国立国会図書館サーチ（国立国会図書館の所蔵資料）</p>`;
+  revealBooks(box);
+  loadUnowned();
+  const more = $('.unowned-more');
+  if (more && allLoaded && 'IntersectionObserver' in window) {
+    unownedObserver = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting) || unowned.running) return;
+      unownedObserver.disconnect();
+      unowned.shown += UNOWNED_STEP;
+      drawUnowned();
+    }, { rootMargin: '0px 0px 300px 0px' });
+    unownedObserver.observe(more);
+  }
+}
+function loadUnowned() {
+  if (unowned.running) return;
+  const todo = authorCounts().slice(0, unowned.shown).map(([n]) => n).filter((n) => !unowned.works.has(n) && !unowned.failed.has(n));
+  if (!todo.length) return;
+  unowned.running = (async () => {
+    for (const name of todo) {
+      if (route.name !== 'author' || route.arg || ui.authorMode !== 'unowned') break; // 画面を離れたら止め、戻ったら続きから
+      try { unowned.works.set(name, await ndl.searchAuthor(name)); } catch { unowned.failed.add(name); }
+      drawUnowned();
+    }
+  })().finally(() => {
+    unowned.running = null;
+    if (route.name === 'author' && !route.arg && ui.authorMode === 'unowned') drawUnowned();
+  });
+}
+
+// カレンダー：フォロー中の著者の新刊・シリーズの新しい巻・本棚に登録した発売予定の本
+function calendarItems() {
+  const items = [];
+  const seen = new Set();
+  for (const raw of store.releases()) {
+    const r = { ...raw, ...confirmedRelease(raw) };
+    seen.add(`${normTitle(r.title)}|${normName(r.author)}`);
+    items.push({ kind: 'release', key: r.key, title: r.title, author: r.author, date: releaseDate(r), month: r.month,
+      isbn: r.isbn, coverIsbns: r.coverIsbns || [].concat(r.coverIsbn || []), publisher: r.publisher, series: r.series || '' });
+  }
+  const from = monthsAgo(2);
+  for (const b of store.books()) {
+    const d = b.publishedAt || '';
+    if (d.length < 7 || d.slice(0, 7) < from || seen.has(`${normTitle(b.title)}|${normName(b.author)}`)) continue;
+    items.push({ kind: 'book', id: b.id, title: b.title, author: b.author, date: d.length === 10 ? d : '', month: d.slice(0, 7),
+      isbn: b.isbn, coverIsbns: b.coverIsbns || [].concat(b.coverIsbn || []), publisher: b.publisher, series: '' });
+  }
+  return items;
+}
+const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dateOf = (s) => new Date(`${s}T00:00:00`);
+const weekStart = (s) => { const d = dateOf(s); d.setDate(d.getDate() - d.getDay()); return ymdOf(d); };
+const dayLabel = (s) => { const d = dateOf(s); return `${d.getMonth() + 1}月${d.getDate()}日（${WEEKDAYS[d.getDay()]}）`; };
+
+function calendarBookLine(it) {
+  return `<button type="button" class="cal-line" data-act="cal-day" data-date="${esc(it.date)}">
+    ${cover(it.title, it.isbn, 'xs', it.coverIsbns, it.author)}
+    <span class="cal-line-main"><span class="cal-line-title">${esc(it.title)}</span><span class="cal-line-author">${esc(it.author)}${it.kind === 'book' ? '・本棚' : ''}</span></span>
+  </button>`;
+}
+function undatedList(items, month) {
+  const list = items.filter((it) => !it.date && it.month === month);
+  if (!list.length) return '';
+  return `<section class="cal-undated"><h3>日付未定（${esc(monthLabel(month))}発売予定）</h3>
+    <ul>${list.map((it) => `<li><button type="button" class="cal-line" data-act="${it.kind === 'release' ? 'release-detail' : 'open'}" ${it.kind === 'release' ? `data-key="${esc(it.key)}"` : `data-id="${esc(it.id)}"`}>
+      ${cover(it.title, it.isbn, 'xs', it.coverIsbns, it.author)}<span class="cal-line-main"><span class="cal-line-title">${esc(it.title)}</span><span class="cal-line-author">${esc(it.author)}</span></span></button></li>`).join('')}</ul></section>`;
+}
+
+function drawCalendar() {
+  const box = $('#works-body');
+  if (!box) return;
+  const mode = ui.calView === 'week' ? 'week' : 'month';
+  const items = calendarItems();
+  const byDate = new Map();
+  for (const it of items) if (it.date) byDate.set(it.date, [...(byDate.get(it.date) || []), it]);
+  const t = today();
+  const switcher = `<div class="cal-bar">
+      <div class="cal-switch" role="group" aria-label="カレンダーの表示">${[['month', '月'], ['week', '週']].map(([id, label]) => `<button type="button" class="${mode === id ? 'on' : ''}" data-act="cal-view" data-v="${id}" aria-pressed="${mode === id}">${label}</button>`).join('')}</div>
+      <button type="button" class="ghost small" data-act="cal-today">今日</button>
+    </div>`;
+  let body = '';
+  if (mode === 'month') {
+    const ym = /^\d{4}-\d{2}$/.test(ui.calMonth || '') ? ui.calMonth : t.slice(0, 7);
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const days = new Date(y, m, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<div class="cal-cell blank" aria-hidden="true"></div>');
+    for (let d = 1; d <= days; d++) {
+      const date = `${ym}-${String(d).padStart(2, '0')}`;
+      const list = byDate.get(date) || [];
+      const cls = `cal-cell${date === t ? ' today' : ''}${list.length ? ' has' : ''}${new Date(y, m - 1, d).getDay() === 0 ? ' sun' : ''}`;
+      cells.push(list.length
+        ? `<div class="${cls}"><button type="button" class="cal-day" data-act="cal-day" data-date="${date}" aria-label="${esc(dayLabel(date))} ${list.length}冊"><span class="cal-num">${d}</span>${cover(list[0].title, list[0].isbn, 'xs', list[0].coverIsbns, list[0].author)}${list.length > 1 ? `<span class="cal-count">+${list.length - 1}</span>` : ''}</button></div>`
+        : `<div class="${cls}"><span class="cal-num">${d}</span></div>`);
+    }
+    const monthItems = items.filter((it) => it.date && it.date.startsWith(ym)).sort((a, b) => a.date.localeCompare(b.date));
+    body = `<div class="cal-nav"><button type="button" class="icon-btn" data-act="cal-move" data-v="-1" aria-label="前の月">‹</button><h2>${y}年${m}月</h2><button type="button" class="icon-btn" data-act="cal-move" data-v="1" aria-label="次の月">›</button></div>
+      <div class="cal-grid" role="grid" aria-label="${y}年${m}月の発売日">${WEEKDAYS.map((w, i) => `<div class="cal-dow${i === 0 ? ' sun' : ''}" aria-hidden="true">${w}</div>`).join('')}${cells.join('')}</div>
+      ${monthItems.length ? `<section class="cal-month-list"><h3>この月の発売</h3><ul>${monthItems.map((it) => `<li><span class="cal-date">${Number(it.date.slice(8))}日<small>${WEEKDAYS[dateOf(it.date).getDay()]}</small></span>${calendarBookLine(it)}</li>`).join('')}</ul></section>`
+      : `<p class="muted cal-empty">この月に発売日が分かっている本はありません。</p>`}
+      ${undatedList(items, ym)}`;
+  } else {
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(ui.calWeek || '') ? weekStart(ui.calWeek) : weekStart(t);
+    const dates = Array.from({ length: 7 }, (_, i) => { const d = dateOf(start); d.setDate(d.getDate() + i); return ymdOf(d); });
+    const months = [...new Set(dates.map((d) => d.slice(0, 7)))];
+    const range = `${dateOf(dates[0]).getMonth() + 1}月${dateOf(dates[0]).getDate()}日〜${dateOf(dates[6]).getMonth() + 1}月${dateOf(dates[6]).getDate()}日`;
+    body = `<div class="cal-nav"><button type="button" class="icon-btn" data-act="cal-move" data-v="-1" aria-label="前の週">‹</button><h2>${range}</h2><button type="button" class="icon-btn" data-act="cal-move" data-v="1" aria-label="次の週">›</button></div>
+      <ol class="cal-week">${dates.map((date) => {
+        const list = byDate.get(date) || [];
+        const d = dateOf(date);
+        return `<li class="cal-week-day${date === t ? ' today' : ''}${d.getDay() === 0 ? ' sun' : ''}">
+          <div class="cal-week-date"><b>${d.getDate()}</b><span>${WEEKDAYS[d.getDay()]}</span></div>
+          <div class="cal-week-books">${list.length ? list.map(calendarBookLine).join('') : '<span class="cal-none">—</span>'}</div>
+        </li>`;
+      }).join('')}</ol>
+      ${months.map((mo) => undatedList(items, mo)).join('')}`;
+  }
+  box.innerHTML = `${switcher}${body}
+    <p class="source">フォロー中の著者（本棚の著者）の新刊、本棚のシリーズの新しい巻、本棚に登録した発売予定の本。日付は出版社の近刊情報（国立国会図書館サーチ）です。</p>`;
+}
+
+// 日付をタップ：その日に出る本を、表紙と短い内容紹介で
+let daySheet = null;
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n).trim()}…` : s);
+function renderCalendarDay(date) {
+  stopBookPreview(); flushMemo(); stopScanning(); openId = null;
+  const items = calendarItems().filter((it) => it.date === date);
+  const controller = new AbortController();
+  daySheet = { controller, date };
+  sheetBody.innerHTML = `<h2 class="sheet-title">${esc(dayLabel(date))}${date > today() ? '発売予定' : '発売'}</h2>
+    ${items.length ? `<ul class="day-books">${items.map((it, i) => `<li class="day-book">
+      ${cover(it.title, it.isbn, 'm', it.coverIsbns, it.author)}
+      <div class="day-book-main">
+        <h3>${esc(it.title)}</h3>
+        <p class="book-author">${esc(it.author)}${it.publisher ? `・${esc(it.publisher)}` : ''}</p>
+        ${it.series ? `<p class="book-meta series-note">本棚のシリーズ「${esc(it.series)}」の新しい巻</p>` : ''}
+        <div class="day-synopsis" id="day-syn-${i}">${loading('内容紹介を読み込んでいます…')}</div>
+        <div class="row">${it.kind === 'release'
+          ? `<button type="button" class="ghost small" data-act="release-detail" data-key="${esc(it.key)}">詳しく見る</button><button type="button" class="add-btn" data-act="release-add" data-key="${esc(it.key)}">＋登録</button>`
+          : `<button type="button" class="ghost small" data-act="open" data-id="${esc(it.id)}">本棚の記録を開く</button>`}</div>
+      </div>
+    </li>`).join('')}</ul>` : '<p class="muted">この日に出る本はありません。</p>'}`;
+  showSheet();
+  sheet.scrollTop = 0;
+  items.forEach(async (it, i) => {
+    const put = (text) => { if (daySheet?.controller === controller) { const el = $(`#day-syn-${i}`); if (el) el.textContent = text; } };
+    try {
+      const info = await loadBookDetails({ isbn: it.isbn, title: it.title, author: it.author }, { signal: controller.signal });
+      put(info.synopsis ? clip(info.synopsis, 120) : 'この本の内容紹介は、まだ提供されていません。');
+    } catch { if (!controller.signal.aborted) put('内容紹介を読み込めませんでした。'); }
+  });
+}
+
+// 著者のページ（著書の名前や本の詳細から開く）。名前で探すのは「検索」タブ
 function renderAuthor(name) {
   const token = ++renderToken;
   if (!name) { renderAuthorHome(); hydrateReleaseCovers(); return; }
   view.innerHTML = `
     <section>
-      ${searchBar(name)}
+      <a class="back-link" href="#author">‹ 著書</a>
       <div id="author-result">${loading(`${name} の作品を国立国会図書館サーチで調べています…`)}</div>
     </section>`;
   ndl.searchAuthor(name).then((works) => {
@@ -728,11 +1092,14 @@ function drawAuthorResult(name, works) {
   const shown = ui.notOnShelf ? rows.filter((r) => !r.o)
     : ui.unreadOnly ? rows.filter((r) => r.o?.status !== 'done') : rows;
   const toggle = (key, label) => `<button type="button" class="chip small ${ui[key] ? 'on' : ''}" data-act="toggle-ui" data-v="${key}" aria-pressed="${ui[key]}">${label}</button>`;
+  const follow = isShelfAuthor(name)
+    ? '<span class="follow-btn on auto">本棚の著者・新刊を確認中</span>'
+    : `<button type="button" class="follow-btn ${store.isFollowing(name) ? 'on' : ''}" data-act="toggle-follow" data-name="${esc(name)}" aria-pressed="${store.isFollowing(name)}">${store.isFollowing(name) ? 'フォロー中' : '新刊をフォロー'}</button>`;
   $('#author-result').innerHTML = `
     <div class="result-head">
       <div class="result-title">
         <h2 class="result-name">${esc(name)}</h2>
-        <button type="button" class="follow-btn ${store.isFollowing(name) ? 'on' : ''}" data-act="toggle-follow" data-name="${esc(name)}" aria-pressed="${store.isFollowing(name)}">${store.isFollowing(name) ? 'フォロー中' : '新刊をフォロー'}</button>
+        ${follow}
       </div>
       <p class="tally"><b>${visible.length}</b>作品 ・ 読了 <b>${done}</b> ・ 本棚で未読 <b>${onShelf}</b> ・ まだ登録していない <b class="accent">${unknown}</b></p>
       <div class="chips wrap">${toggle('unreadOnly', '未読だけ')}${toggle('notOnShelf', '本棚にない本だけ')}${litShare >= 0.6 ? toggle('showOther', '小説以外も') : ''}${toggle('showAntho', 'アンソロジー・共著も')}</div>
@@ -780,6 +1147,8 @@ async function checkReleases(names) {
       const items = works.filter((w) => !owned(w)).map((w) => ({
         key: `${normTitle(w.main + (w.volume || ''))}|${normName(name)}`,
         title: w.main + (w.volume ? ` ${w.volume}` : ''), baseTitle:w.main, volume:w.volume || '', author: name, month: w.lastMonth,
+        // 出版社の近刊情報には発売日まであることが多い（カレンダーで使う）
+        publishedAt: w.editions.map((e) => e.publishedAt || '').filter((d) => d.length === 10 && d.startsWith(w.lastMonth)).sort().pop() || '',
         publisher: w.latest?.publisher || '', isbn: w.latest?.isbn || '', link: w.latest?.link || '', ndc: w.ndc || '',
       }));
       for (const it of items.filter(x=>!x.isbn || x.month>=today().slice(0,7))) {
@@ -796,7 +1165,7 @@ async function checkReleases(names) {
   }
   checking = null;
   refreshReleaseUI();
-  if (found) toast(`フォロー中の著者の新刊・近刊が${found}冊見つかりました（著者タブ）`);
+  if (found) toast(`本棚の著者などの新刊・近刊が${found}冊見つかりました（著書タブ）`);
 }
 
 async function resolveReleaseCovers(item) {
@@ -818,23 +1187,40 @@ async function resolveReleaseCovers(item) {
 let hydratingReleaseCovers=null;
 function hydrateReleaseCovers() {
   if (hydratingReleaseCovers) return hydratingReleaseCovers;
-  const items=store.releases().filter(r=>store.isFollowing(r.author)
+  const items=store.releases().filter(r=>(store.isFollowing(r.author) || r.series)
     && (r.coverLookupVersion!==COVER_LOOKUP_VERSION || !r.coverCheckedAt || Date.now()-Date.parse(r.coverCheckedAt)>7*24*3600*1000));
   hydratingReleaseCovers=(async()=>{
     for (const item of items) {
       if ((route.name==='search' && ui.searchQ) || sheet.open) break; // 手入力/検索を待たせず、著者画面へ戻ったとき再開する
-      if (!store.isFollowing(item.author) || !store.releases().some(r=>r.key===item.key)) continue;
+      const keep=()=>store.isFollowing(item.author) || item.series;
+      if (!keep() || !store.releases().some(r=>r.key===item.key)) continue;
       try {
         const patch=await resolveReleaseCovers(item);
-        if (store.isFollowing(item.author)) store.updateReleaseCovers(item.key,patch);
+        if (keep()) store.updateReleaseCovers(item.key,patch);
       } catch { /* 一時的な通信エラーでは更新済み扱いにせず、次回に試す */ }
     }
   })().finally(()=>{hydratingReleaseCovers=null;});
   return hydratingReleaseCovers;
 }
 
-const staleFollows = () => store.follows()
-  .filter((f) => !f.lastChecked || Date.now() - Date.parse(f.lastChecked) > 12 * 3600 * 1000).map((f) => f.name);
+// 12 時間たった著者を、自分でフォローした著者 → 本棚に多い著者 → 確認の古い順に並べる
+function staleFollows() {
+  const count = new Map(authorCounts().map(([n, c]) => [normName(n), c]));
+  return store.follows()
+    .filter((f) => !f.lastChecked || Date.now() - Date.parse(f.lastChecked) > 12 * 3600 * 1000)
+    .sort((a, b) => Number(!!a.auto) - Number(!!b.auto) || (count.get(normName(b.name)) || 0) - (count.get(normName(a.name)) || 0)
+      || (a.lastChecked || '').localeCompare(b.lastChecked || ''))
+    .map((f) => f.name);
+}
+const AUTO_CHECK_LIMIT = 30; // 起動時に調べる著者の数（国会図書館への問い合わせを重くしすぎない）
+
+// 本棚の著者を自動でフォローし、新しく加わった著者の新刊はすぐ調べる
+function syncShelfAuthors() {
+  const before = new Set(store.follows().map((f) => normName(f.name)));
+  if (!store.syncShelfFollows(authorCounts().map(([n]) => n))) return;
+  const added = store.follows().filter((f) => !before.has(normName(f.name))).map((f) => f.name);
+  if (added.length && added.length <= 5) checkReleases(added);
+}
 
 // ---------------------------------------------------------------- 検索：書名・著者・ISBN で探して本棚に登録する
 const SEARCH_KINDS = [['all', 'すべて'], ['title', '書名'], ['author', '著者'], ['isbn', 'ISBN']];
@@ -1025,7 +1411,7 @@ async function importBackup(file) {
 }
 
 // ---------------------------------------------------------------- 画面切り替え
-const TITLES = { shelf: '本棚', author: '著者', search: '検索', stats: '読書の記録' };
+const TITLES = { shelf: '本棚', author: '著書', search: '検索', stats: '読書の記録' };
 
 function render() {
   stopShelfLoading();
@@ -1061,8 +1447,10 @@ function onHash() {
 // 本棚が変わったとき、入力中でなければ今の画面を描き直す
 store.subscribe((ev) => {
   if (ev.type === 'save-error') { toast('保存できませんでした。端末の空き容量を確認してください'); return; }
+  if (ev.type === 'change') syncShelfAuthors(); // 本が増減したら、本棚の著者のフォローをそろえる
   updateBadge();
-  if (ev.type==='release-covers') {if (route.name==='author' && !route.arg) renderAuthorHome();return;}
+  // 裏の新刊確認・表紙の補充・自動フォローは、著書の画面だけ描き直す（本棚を見ている最中に一覧を作り直さない）
+  if (['release-covers', 'releases', 'follows'].includes(ev.type)) { if (route.name==='author' && !route.arg) renderAuthorHome(); return; }
   if (route.name === 'author' && !route.arg) { renderAuthorHome(); return; }
   if (route.name === 'shelf' || route.name === 'stats') {
     const focused = document.activeElement?.id;
@@ -1077,6 +1465,18 @@ store.subscribe((ev) => {
 const actions = {
   'versions': renderVersionHistory,
   'work-detail': el=>previewWork(workCache.get(el.dataset.key)),
+  'series-vol': (el) => {
+    const v = findSeriesVol(el.dataset.key, el.dataset.vol);
+    if (v?.book) renderSheetBook(v.book.id);
+    else if (v?.work) previewWork(v.work);
+  },
+  'series-add': (el) => {
+    const v = findSeriesVol(el.dataset.key, el.dataset.vol);
+    if (!v?.work || v.book) return;
+    // 著者名は本棚の表記にそろえる（同じシリーズとしてまとまるように）
+    const author = shelfSeries(store.books()).find((s) => s.key === el.dataset.key)?.author;
+    addFromWork(v.work, { source: 'series', publishedAt: v.publishedAt, author });
+  },
   'release-detail': el=>previewRelease(store.releases().find(r=>r.key===el.dataset.key)),
   'preview-retry': ()=>{if (preview && !preview.loading) requestPreviewInfo(preview);},
   'preview-add': ()=>{
@@ -1210,11 +1610,30 @@ const actions = {
     toast(`${names.length}人をフォローしました。新刊を順に調べます`);
     checkReleases(names);
   },
-  'check-releases': () => checkReleases(store.follows().map((f) => f.name)),
+  'check-releases': () => checkReleases(staleFollows().length ? staleFollows() : store.follows().map((f) => f.name)),
   'release-add': (el) => {
     const r=store.releases().find(x=>x.key===el.dataset.key);
     if (r) addFromRelease(r);
+    if (daySheet && sheet.open) renderCalendarDay(daySheet.date); // カレンダーの日付の画面は「本棚の記録を開く」に替える
   },
+  'author-mode': (el) => { ui.authorMode = el.dataset.v; saveUi(); renderAuthorHome(); window.scrollTo(0, 0); },
+  'cal-view': (el) => { ui.calView = el.dataset.v; saveUi(); drawCalendar(); },
+  'cal-today': () => { ui.calMonth = ''; ui.calWeek = ''; saveUi(); drawCalendar(); },
+  'cal-move': (el) => {
+    const step = Number(el.dataset.v) || 0;
+    if (ui.calView === 'week') {
+      const d = dateOf(/^\d{4}-\d{2}-\d{2}$/.test(ui.calWeek || '') ? weekStart(ui.calWeek) : weekStart(today()));
+      d.setDate(d.getDate() + step * 7);
+      ui.calWeek = ymdOf(d);
+    } else {
+      const [y, m] = (/^\d{4}-\d{2}$/.test(ui.calMonth || '') ? ui.calMonth : today().slice(0, 7)).split('-').map(Number);
+      ui.calMonth = ymdOf(new Date(y, m - 1 + step, 1)).slice(0, 7);
+    }
+    saveUi();
+    drawCalendar();
+  },
+  'cal-day': (el) => renderCalendarDay(el.dataset.date),
+  'unowned-retry': () => { unowned.failed.clear(); drawUnowned(); },
   'release-dismiss': (el) => store.dismissRelease(el.dataset.key),
 };
 
@@ -1308,9 +1727,10 @@ store.mergeSeed('data/seed.json').then((n) => {
   if (n) toast(`写真から読み取った${n}冊を本棚に入れました`);
   // 初めて開いた端末で検索タブから入ると、おすすめを空の本棚で作ってしまう。取り込み後に作り直す
   if (n && route.name === 'search' && !ui.searchQ) loadRecommendations();
+  store.syncShelfFollows(authorCounts().map(([a]) => a)); // 本棚の著者を自動でフォロー
   updateBadge();
-  const stale = staleFollows(); // 前回のチェックから 12 時間たった著者だけ調べ直す
-  hydrateReleaseCovers().finally(()=>{ if (stale.length) checkReleases(stale); });
+  const stale = staleFollows().slice(0, AUTO_CHECK_LIMIT); // 12 時間たった著者だけ、優先の高い順に調べ直す
+  hydrateReleaseCovers().finally(async ()=>{ if (stale.length) await checkReleases(stale); checkSeries(); });
 });
 navigator.storage?.persist?.().catch(() => {});
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

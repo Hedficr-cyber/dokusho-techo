@@ -1857,12 +1857,14 @@ function showMergePlan(data, source) {
   const plan = store.planMerge(data);
   stopBookPreview(); flushMemo(); stopScanning(); openId=null;
   const doneAdd = plan.add.filter((b) => b.status === 'done').length;
-  sheetBody.innerHTML = `<h2 class="sheet-title">本を追加で読み込む</h2>
-    <p>${esc(source)}を、いまの本棚（${store.books().length}冊）に足します。消える本はありません。</p>
-    <ul class="merge-summary"><li>新しく追加 <b>${plan.add.length}</b>冊${doneAdd ? `（うち読了 ${doneAdd}冊）` : ''}</li><li>本棚の本を読了にする <b>${plan.read.length}</b>冊</li><li>すでにある本 <b>${plan.same}</b>冊（そのまま）</li></ul>
+  // 読了の本は本棚には並ばず、記録と読書図鑑に入る（本人：写真の読了本は図鑑に入れたい、本棚には入れなくていい）
+  const allDone = doneAdd === plan.add.length && !plan.add.some((b) => b.status !== 'done');
+  sheetBody.innerHTML = `<h2 class="sheet-title">${allDone && plan.add.length ? '読んだ本を図鑑に入れる' : '本を追加で読み込む'}</h2>
+    <p>${esc(source)}を、この端末の読書手帖に足します。消える本はありません。${doneAdd ? '<br>読了の本は本棚には並ばず、「記録」と「読書図鑑」に入ります。' : ''}</p>
+    <ul class="merge-summary">${allDone ? `<li>読了として追加 <b>${plan.add.length}</b>冊（記録・図鑑へ）</li>` : `<li>新しく追加 <b>${plan.add.length}</b>冊${doneAdd ? `（うち読了 ${doneAdd}冊は記録・図鑑へ）` : ''}</li>`}<li>本棚の本を読了にする <b>${plan.read.length}</b>冊</li><li>すでにある本 <b>${plan.same}</b>冊（そのまま）</li></ul>
     ${plan.add.length ? `<details class="merge-list"><summary>追加する本を見る</summary><ol>${plan.add.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}${b.status === 'done' ? '・読了' : ''}</span></li>`).join('')}</ol></details>` : ''}
     ${plan.read.length ? `<details class="merge-list"><summary>読了にする本を見る</summary><ol>${plan.read.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}</span></li>`).join('')}</ol></details>` : ''}
-    <div class="row">${plan.add.length || plan.read.length ? '<button type="button" class="primary" data-act="confirm-merge">追加する</button>' : ''}<button type="button" class="ghost" data-act="close">${plan.add.length || plan.read.length ? 'やめる' : '閉じる'}</button></div>`;
+    <div class="row">${plan.add.length || plan.read.length ? `<button type="button" class="primary" data-act="confirm-merge">${allDone ? '図鑑に入れる' : '追加する'}</button>` : ''}<button type="button" class="ghost" data-act="close">${plan.add.length || plan.read.length ? 'やめる' : '閉じる'}</button></div>`;
   mergeFile.pending = data;
   showSheet(); sheetBody.scrollTop = 0;
 }
@@ -2236,7 +2238,7 @@ const actions = {
       const r = store.mergeBooks(mergeFile.pending);
       mergeFile.pending = null;
       closeSheet();
-      toast(`${r.added}冊を追加${r.read ? `、${r.read}冊を読了に` : ''}しました`);
+      toast(r.addedDone === r.added && r.added ? `${r.added}冊を読了として記録・図鑑に入れました${r.read ? `（${r.read}冊を読了に）` : ''}` : `${r.added}冊を追加${r.read ? `、${r.read}冊を読了に` : ''}しました`);
     } catch { toast('読み込めませんでした'); }
   },
   'confirm-import': () => {

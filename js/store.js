@@ -262,7 +262,7 @@ export function mergeBooks(data) {
     added.push(b);
   }
   state.books.unshift(...added); // ファイルの順のまま、本棚の先頭に
-  const result = { added: plan.filter((p) => p.type === 'add').length, read: plan.filter((p) => p.type === 'read').length };
+  const result = { added: added.length, addedDone: added.filter((b) => b.status === 'done').length, read: plan.filter((p) => p.type === 'read').length };
   if (result.added || result.read) save();
   return result;
 }

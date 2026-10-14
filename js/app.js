@@ -1623,11 +1623,11 @@ function renderStats() {
     const month = b.finishedAt ? b.finishedAt.slice(0,7) : 'unknown';
     let heading = '';
     if (month !== lastMonth) { lastMonth = month; heading = `<li class="history-month">${month === 'unknown' ? '読了日未登録' : esc(monthLabel(month))}</li>`; }
-    // 読了日のない本は日付の欄を置かない（v0.15 本人：本の横の小さい横線はいらない）
+    // 読了日のない本は日付の欄を置かない（v0.15 本人：本の横の小さい横線はいらない）。右端の矢印も置かない（v0.15.3）
     return `${heading}<li class="book history-book" role="button" tabindex="0" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)}の読書記録">
       ${b.finishedAt ? `<span class="finished-day">${Number(b.finishedAt.slice(8,10))}<small>日</small></span>` : ''}
       ${cover(b.title,b.isbn,'s',b.coverIsbns || b.coverIsbn || [],b.author)}<div class="book-main"><div class="book-title">${esc(b.title)}</div><div class="book-author">${esc(b.author)}</div>
-        ${b.memo ? `<p class="history-memo">${esc(b.memo)}</p>` : ''}${b.rating ? `<span class="rating">${stars(b.rating)}</span>` : ''}</div>${icon('arrow')}
+        ${b.memo ? `<p class="history-memo">${esc(b.memo)}</p>` : ''}${b.rating ? `<span class="rating">${stars(b.rating)}</span>` : ''}</div>
     </li>`;
   }).join('');
   view.innerHTML = `<section class="history">
@@ -1655,6 +1655,7 @@ function renderStats() {
 
 // 読了した年：年ごとの冊数を 1 行の棒グラフで見せ、棒に触れるとその年の本だけ、「すべて」で全部
 // （v0.15.2 本人：すべて〜2015年のボタンが多すぎる。読了日はそのまま、見せ方だけ変える）
+// 年は '25、冊数は「7冊」と書き分け、どちらが年か冊数か迷わないように（v0.15.3）
 function yearChart(done, years, year) {
   if (!years.length) return '';
   const count = new Map();
@@ -1669,7 +1670,7 @@ function yearChart(done, years, year) {
       <button type="button" class="yc-all ${all ? 'on' : ''}" data-act="history-year" data-v="all" aria-pressed="${all}">すべて</button></div>
     <div class="yc-bars" role="group" aria-label="読了した年">${span.map((y) => {
       const n = count.get(y) || 0;
-      const inner = `<span class="yc-plot">${n ? `<span class="yc-n">${n}</span>` : ''}<i style="height:${n ? 4 + Math.round((n / max) * 34) : 2}px"></i></span><span class="yc-y">${y.slice(2)}</span>`;
+      const inner = `<span class="yc-plot">${n ? `<span class="yc-n">${n}<small>冊</small></span>` : ''}<i style="height:${n ? 4 + Math.round((n / max) * 34) : 2}px"></i></span><span class="yc-y">'${y.slice(2)}</span>`;
       return n
         ? `<button type="button" class="yc-bar ${y === year ? 'on' : ''}" data-act="history-year" data-v="${y}" aria-pressed="${y === year}" aria-label="${y}年 ${n}冊">${inner}</button>`
         : `<span class="yc-bar none" aria-hidden="true">${inner}</span>`;
@@ -2518,7 +2519,73 @@ document.addEventListener('submit', (e) => {
 });
 
 sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); });
+
+// ---------------------------------------------------------------- 表紙の拡大
+// 本の詳細の表紙に触れると、その位置から画面の中央へ大きく広がる（v0.15.3 本人：表紙がブワンと大きくなって見やすく）。
+// どこかに触れるか Esc で元の位置へ戻る。表紙の画像がない本（書名を組んだ表紙）は広げない
+let coverZoom = null;
+function zoomCover(img) {
+  if (coverZoom || !img.naturalWidth) return;
+  let box = $('#cover-zoom');
+  if (!box) {
+    box = document.createElement('dialog');
+    box.id = 'cover-zoom'; box.className = 'cover-zoom'; box.setAttribute('aria-label', '表紙');
+    box.innerHTML = '<div class="cz-shade"></div><img class="cz-img" alt="">';
+    box.addEventListener('click', () => unzoomCover());
+    box.addEventListener('cancel', (e) => { e.preventDefault(); unzoomCover(); });
+    document.body.append(box);
+  }
+  const big = box.querySelector('.cz-img');
+  const ratio = img.naturalHeight / img.naturalWidth;
+  const w = Math.min(innerWidth * 0.84, 420, (innerHeight * 0.78) / ratio);
+  const to = { left: (innerWidth - w) / 2, top: (innerHeight - w * ratio) / 2, width: w, height: w * ratio };
+  Object.assign(big.style, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px` });
+  big.src = img.currentSrc || img.src;
+  // 版元ドットコムの表紙は、幅 600px の版を裏で読み、届いたら差し替える（小さい表紙を引き伸ばしたぼやけを減らす）
+  if (img.dataset.step === '0' && /^\d{13}$/.test(img.dataset.isbn || '')) {
+    const hi = new Image();
+    hi.src = `https://img.hanmoto.com/bd/img/${img.dataset.isbn}_600.jpg`;
+    hi.decode().then(() => {
+      if (coverZoom?.big === big && !coverZoom.closing && hi.naturalWidth > img.naturalWidth && hi.naturalHeight > hi.naturalWidth * 1.05) big.src = hi.src;
+    }).catch(() => {});
+  }
+  const from = img.getBoundingClientRect();
+  const holder = img.closest('.cover') || img; // 広げている間は元の表紙の場所を空ける（下の書名の表紙も見せない）
+  coverZoom = { img, holder, box, big, to };
+  box.showModal();
+  holder.style.visibility = 'hidden';
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  box.querySelector('.cz-shade').animate([{ opacity: 0 }, { opacity: 1 }], { duration: still ? 120 : 260, easing: 'ease-out' });
+  if (still) big.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
+  else big.animate([{ transform: zoomFrom(from, to), borderRadius: '3px' }, { transform: 'none', borderRadius: '8px' }], { duration: 460, easing: 'cubic-bezier(.2,1.32,.36,1)' });
+}
+// 小さい表紙の位置・大きさから広げるための変形
+const zoomFrom = (r, to) => `translate(${r.left - to.left}px, ${r.top - to.top}px) scale(${r.width / to.width}, ${r.height / to.height})`;
+function unzoomCover() {
+  const z = coverZoom;
+  if (!z || z.closing) return;
+  z.closing = true;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const r = z.img.isConnected ? z.img.getBoundingClientRect() : null;
+  z.big.getAnimations().forEach((a) => a.cancel()); // 広がる途中で触れたときも、いまの大きさから戻す
+  z.box.querySelector('.cz-shade').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-in', fill: 'forwards' });
+  const back = still || !r?.width ? z.big.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: 'forwards' })
+    : z.big.animate([{ transform: 'none', borderRadius: '8px' }, { transform: zoomFrom(r, z.to), borderRadius: '3px' }], { duration: 260, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'forwards' });
+  back.finished.catch(() => {}).finally(() => {
+    z.holder.style.visibility = '';
+    if (z.box.open) z.box.close();
+    z.big.getAnimations().forEach((a) => a.cancel());
+    z.box.querySelector('.cz-shade').getAnimations().forEach((a) => a.cancel());
+    z.big.removeAttribute('src');
+    if (coverZoom === z) coverZoom = null;
+  });
+}
+sheet.addEventListener('click', (e) => {
+  const img = e.target.closest?.('.detail-head > .cover')?.querySelector('img.ok');
+  if (img) zoomCover(img);
+});
 sheet.addEventListener('close', () => {
+  if (coverZoom) unzoomCover();
   stopBookPreview();
   stopScanning();
   flushMemo();

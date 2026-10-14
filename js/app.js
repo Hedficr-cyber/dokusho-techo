@@ -20,6 +20,37 @@ const sheet = $('#sheet');
 const sheetBody = $('#sheet-body');
 const THIS_YEAR = new Date().getFullYear();
 
+// 下から出る画面を開いている間は、後ろのページを動かさない。iPhone は body の overflow:hidden だけでは
+// 指の操作で後ろが動くので、ページを今の位置で固定し、閉じたら元の位置へ戻す
+let lockedScrollY = 0;
+function lockPage() {
+  if (document.body.classList.contains('sheet-locked')) return;
+  lockedScrollY = window.scrollY;
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.classList.add('sheet-locked');
+}
+function unlockPage() {
+  if (!document.body.classList.contains('sheet-locked')) return;
+  document.body.classList.remove('sheet-locked');
+  document.body.style.top = '';
+  window.scrollTo(0, lockedScrollY);
+}
+const showSheet = () => { if (!sheet.open) sheet.showModal(); lockPage(); };
+
+// 下のナビのガラスの面を、選んだタブの位置へすべらせる。最初と画面の幅が変わったときは動かさずに置く
+function placeGlider(animate = true) {
+  const nav = $('.tabbar');
+  const glider = $('.tab-glider');
+  const tab = nav?.querySelector('.tab[aria-current=page]');
+  if (!glider || !tab || !tab.offsetWidth) return;
+  glider.classList.toggle('no-anim', !animate || !nav.classList.contains('has-glider'));
+  glider.style.width = `${tab.offsetWidth}px`;
+  glider.style.transform = `translateX(${tab.offsetLeft}px)`;
+  if (!nav.classList.contains('has-glider')) requestAnimationFrame(() => { nav.classList.add('has-glider'); requestAnimationFrame(() => glider.classList.remove('no-anim')); });
+  else if (!animate) requestAnimationFrame(() => glider.classList.remove('no-anim'));
+}
+window.addEventListener('resize', () => placeGlider(false));
+
 // ---------------------------------------------------------------- 画面の状態（この端末だけで覚える）
 const UI_KEY = 'dokusho-techo:ui';
 const ui = {
@@ -356,7 +387,7 @@ function renderSheetBook(id) {
       <button type="button" class="danger" data-act="delete" data-armed="0">本棚から消す</button>
       <span class="muted small">追加 ${esc(b.addedAt || '')}</span>
     </div>`;
-  if (!sheet.open) sheet.showModal();
+  showSheet();
 }
 
 
@@ -380,6 +411,7 @@ function closeSheet() {
   flushMemo();
   stopScanning();
   if (sheet.open) sheet.close();
+  unlockPage(); // close イベントを待たずに戻す（このあと別の画面へ移るときに位置がずれない）
   openId = null;
 }
 
@@ -470,7 +502,7 @@ function renderBookPreview(book,origin) {
     <section id="preview-summary" class="preview-summary" aria-labelledby="preview-summary-title" aria-busy="true"><h3 id="preview-summary-title">あらすじ</h3><div id="preview-synopsis" aria-live="polite"></div></section>
     <p id="preview-source" class="preview-source"></p><div id="preview-action" class="preview-action"></div>
   </article>`;
-  if (!sheet.open) sheet.showModal();
+  showSheet();
   sheet.scrollTop=0;
   drawPreviewAction(state);
   requestPreviewInfo(state);
@@ -513,7 +545,7 @@ function renderSheetScan() {
     </form>
     <h3 class="sub">読み取った本 <span class="muted" id="scan-count">0冊</span></h3>
     <ul class="books" id="scan-list"></ul>`;
-  if (!sheet.open) sheet.showModal();
+  showSheet();
   const video = $('#scan-video');
   startScanner(video, (isbn) => handleIsbn(isbn), { signal: controller.signal })
     .then((stop) => {
@@ -961,7 +993,7 @@ function renderVersionHistory() {
   stopBookPreview();
   stopScanning(); flushMemo(); openId=null;
   sheetBody.innerHTML=`<h2 class="sheet-title">バージョン履歴</h2><ol class="version-history">${VERSION_HISTORY.map(v=>`<li><div class="version-heading"><h3>${esc(v.version)}</h3><time datetime="${esc(v.date)}">${esc(v.date)}</time></div><ul>${v.changes.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></li>`).join('')}</ol><a class="link" href="https://github.com/Hedficr-cyber/dokusho-techo/commits/main/" target="_blank" rel="noopener noreferrer">GitHubの変更履歴を見る</a>`;
-  if (!sheet.open) sheet.showModal();
+  showSheet();
 }
 
 function exportBackup() {
@@ -986,7 +1018,7 @@ async function importBackup(file) {
       <p>「${esc(file.name)}」の${n}冊で、いまの本棚（${store.books().length}冊）を置き換えます。いまの本棚は元に戻せません。</p>
       <div class="row"><button type="button" class="danger" data-act="confirm-import">置き換える</button><button type="button" class="ghost" data-act="close">やめる</button></div>`;
     importBackup.pending = data;
-    sheet.showModal();
+    showSheet();
   } catch {
     toast('読み込めませんでした。読書手帖で書き出したファイルを選んでください');
   }
@@ -1001,6 +1033,7 @@ function render() {
   workCache = new Map();
   const { name, arg } = route;
   document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-current', t.dataset.tab === name ? 'page' : 'false'));
+  placeGlider();
   $('#view-title').textContent = TITLES[name] || '';
   $('#fab').hidden = false;
   document.body.dataset.page = name;
@@ -1264,6 +1297,7 @@ sheet.addEventListener('close', () => {
   stopScanning();
   flushMemo();
   openId = null;
+  unlockPage();
 });
 
 // ---------------------------------------------------------------- 起動

@@ -1,6 +1,6 @@
 import * as store from './store.js';
 import * as ndl from './ndl.js';
-import { STATUS, STATUS_ORDER, SOURCES, PRIORITY, GENRES, GENRE_BY_ID, GENRE_GROUPS, GENRE_GROUP_BY_ID, belongsToGenre } from './genres.js';
+import { STATUS, STATUS_ORDER, SOURCES, PRIORITY, GENRES, GENRE_BY_ID, GENRE_GROUPS, GENRE_GROUP_BY_ID, GENRE_GROUP_ORDER, belongsToGenre } from './genres.js';
 import { startScanner } from './scan.js';
 import { authorReading } from './authors.js';
 import { SHELF_MODES, primaryGenre, sortShelfBooks } from './shelf.js';
@@ -353,7 +353,8 @@ function renderShelf() {
     : ui.sort==='added' ? (ui.addedDirection==='asc' ? '古く登録した順' : '新しく登録した順') : mode[2];
   const direction=ui.sort==='year' ? ui.yearDirection : ui.addedDirection;
   const genreLabel=(GENRE_GROUP_BY_ID[ui.genre] || GENRE_BY_ID[ui.genre])?.name || '';
-  const genreButtons=[['','すべて'],...GENRE_GROUPS.map(g=>[g.id,g.name]),...(ui.genre && !GENRE_GROUP_BY_ID[ui.genre] ? [[ui.genre,genreLabel]] : [])];
+  // 本棚の本があるジャンルだけ並べる（v0.15 でジャンルを 12 に増やしたので、空のジャンルで埋めない）
+  const genreButtons=[['','すべて'],...GENRE_GROUPS.filter(g=>g.id===ui.genre || all.some(b=>belongsToGenre(b,g.id))).map(g=>[g.id,g.name]),...(ui.genre && !GENRE_GROUP_BY_ID[ui.genre] ? [[ui.genre,genreLabel]] : [])];
   view.innerHTML=`<section class="shelf shelf-sort-${ui.sort}">
     ${pageHead('本棚',`${all.length}冊`)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
@@ -954,7 +955,7 @@ function drawScanned() {
     const b = s.bookId ? store.get(s.bookId) : null;
     let right = '';
     let sub = '';
-    if (s.state === 'loading') sub = '国立国会図書館で調べています…';
+    // 調べている間も文言は出さない（v0.15 本人：ローディングの表示はいらない。たいていすぐ書名が出る）
     if (s.state === 'added' && b) {
       sub = '本棚に追加しました';
       right = `<button type="button" class="ghost small" data-act="scan-undo" data-isbn="${s.isbn}">取り消す</button>`;
@@ -989,6 +990,21 @@ async function handleIsbn(isbn) {
   drawScanned();
   if (owned) return;
   try {
+    // まず openBD で書名・著者を出して本棚に入れる（すぐ返る）。国立国会図書館の書誌は裏で足す
+    const quick = await ndl.openBdSummary(isbn, { signal: session?.signal });
+    if (session?.signal.aborted || session !== scanController) return;
+    if (quick) {
+      const title = quick.title + (quick.volume && !quick.title.includes(quick.volume) ? ` ${quick.volume}` : '');
+      const same = store.books().find((b) => normTitle(b.title) === normTitle(title) && normName(b.author) === normName(quick.author));
+      if (same) { entry.state = 'owned'; entry.bookId = same.id; }
+      else {
+        const b = store.add({ title, author: quick.author, status, priority: 2, source: 'scan', isbn, publisher: quick.publisher, year: quick.year, publishedAt: quick.publishedAt });
+        entry.state = 'added'; entry.bookId = b.id;
+        enrichScanned(b.id, isbn);
+      }
+      drawScanned();
+      return;
+    }
     const w = await ndl.searchIsbn(isbn);
     if (session?.signal.aborted || session !== scanController) return;
     const sameWork = w && shelfIndex()(w); // 単行本と文庫のように ISBN が違っても同じ作品なら足さない
@@ -1012,6 +1028,21 @@ async function handleIsbn(isbn) {
     entry.msg = e.message;
   }
   drawScanned();
+}
+
+// openBD で登録した本に、国立国会図書館の書誌（分類・判型・最初の年・NDL のリンク）を裏で足す（画面には何も出さない）
+async function enrichScanned(id, isbn) {
+  try {
+    const w = await ndl.searchIsbn(isbn);
+    const b = store.get(id);
+    if (!w || !b) return;
+    const patch = {};
+    if (!b.ndc && w.ndc) patch.ndc = w.ndc;
+    if (!b.format && w.latest?.format) patch.format = w.latest.format;
+    if (!b.ndl && w.latest?.link) patch.ndl = w.latest.link;
+    if (w.firstYear && String(w.firstYear) < String(b.year || '9999')) patch.year = String(w.firstYear);
+    if (Object.keys(patch).length) store.update(id, patch);
+  } catch { /* 書誌が足りなくても本棚の本はそのまま */ }
 }
 
 // ---------------------------------------------------------------- 著書：本棚の著者の新刊・持っていない本・発売日カレンダー
@@ -1256,9 +1287,9 @@ function drawCalendar() {
       ${calDayList(weekItems, 'この週の発売', 'この週に発売日が分かっている本はありません。')}
       ${months.map((mo) => undatedList(items, mo)).join('')}`;
   }
-  // 著者の新刊を確かめている間は、冊数が増減することがあると分かるように小さく出す
-  const note = checking ? `<p class="muted small cal-checking">著者の新刊を確かめています（${checking.total}人中${checking.done}人）</p>` : '';
-  box.innerHTML = `${switcher}${body}${note}
+  // 著者の新刊を集めている間は、まだ増えることが分かるように上に出す（v0.15 本人：1 冊だけ？）
+  const note = checking ? `<p class="cal-checking">新刊を集めています（${checking.done} / ${checking.total}人）。しばらくすると増えていきます。</p>` : '';
+  box.innerHTML = `${switcher}${note}${body}
     <p class="source">フォロー中の著者（本棚の著者）の新刊、本棚のシリーズの新しい巻、本棚に登録した発売予定の本。日付は出版社の近刊情報（国立国会図書館サーチ）です。</p>`;
 }
 
@@ -1520,7 +1551,7 @@ function drawRecommendations() {
   const done = results.filter(Boolean).length;
   const items = pickRecommendations(results, { owned: shelfIndex(), hidden: new Set(store.hiddenRecs()), shelfTitles: shelfTitleMap(store.books()), shift: ui.recShift || 0 });
   box.innerHTML = `<section class="recs" aria-labelledby="recs-title">
-      <div class="recs-head"><h2 id="recs-title">あなたへのおすすめ</h2><button type="button" class="link small" data-act="preferences">好みを変更</button></div>
+      <div class="recs-head"><h2 id="recs-title">あなたへのおすすめ</h2></div>
       <p class="recs-taste">${plan.fromPreferences ? '好きなジャンル' : '本棚の傾向'}：${plan.taste.map(esc).join('・')}</p>
 
       ${items.length ? `<ul class="books">${items.map(({ w, reason }) => workRow(w, null, '登録', { reason, hideKey: w.key })).join('')}</ul>`
@@ -1591,8 +1622,9 @@ function renderStats() {
     const month = b.finishedAt ? b.finishedAt.slice(0,7) : 'unknown';
     let heading = '';
     if (month !== lastMonth) { lastMonth = month; heading = `<li class="history-month">${month === 'unknown' ? '読了日未登録' : esc(monthLabel(month))}</li>`; }
+    // 読了日のない本は日付の欄を置かない（v0.15 本人：本の横の小さい横線はいらない）
     return `${heading}<li class="book history-book" role="button" tabindex="0" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)}の読書記録">
-      <span class="finished-day">${b.finishedAt ? Number(b.finishedAt.slice(8,10)) : '—'}<small>${b.finishedAt ? '日' : ''}</small></span>
+      ${b.finishedAt ? `<span class="finished-day">${Number(b.finishedAt.slice(8,10))}<small>日</small></span>` : ''}
       ${cover(b.title,b.isbn,'s',b.coverIsbns || b.coverIsbn || [],b.author)}<div class="book-main"><div class="book-title">${esc(b.title)}</div><div class="book-author">${esc(b.author)}</div>
         ${b.memo ? `<p class="history-memo">${esc(b.memo)}</p>` : ''}${b.rating ? `<span class="rating">${stars(b.rating)}</span>` : ''}</div>${icon('arrow')}
     </li>`;
@@ -2052,20 +2084,18 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', () => { if (sync.syncConfig()) runSync(); });
 
 // 初めての端末は空の本棚で始める。既存の端末の本や読書記録には触れない。
-let preferred=new Set(),editingPreferences=false;
+let preferred=new Set();
+// 初めて開いたときの画面（v0.15 で作り直し）：大まかなジャンル 12 を、名前＋ひとこと＋チェックのカードで。
+// 「本を探す」は下のナビの上に固定（本人：矢印が大きすぎた。矢印はつけない）
 function genreChoices() {
-  return `<div class="preference-genres" role="group" aria-label="好きなジャンル（複数選択）">${GENRE_GROUPS.map(g=>`<button type="button" class="preference-genre ${preferred.has(g.id)?'on':''}" data-act="preference-toggle" data-v="${g.id}" aria-pressed="${preferred.has(g.id)}"><span>${esc(g.name)}</span><span class="preference-check" aria-hidden="true">${preferred.has(g.id)?'✓':'＋'}</span></button>`).join('')}</div>`;
+  const groups=GENRE_GROUP_ORDER.map(id=>GENRE_GROUP_BY_ID[id]).filter(Boolean);
+  return `<div class="preference-genres" role="group" aria-label="好きなジャンル（複数選択）">${groups.map(g=>`<button type="button" class="preference-genre ${preferred.has(g.id)?'on':''}" data-act="preference-toggle" data-v="${g.id}" aria-pressed="${preferred.has(g.id)}"><span class="pg-text"><span class="pg-name">${esc(g.name)}</span><span class="pg-desc">${esc(g.desc)}</span></span><span class="pg-check" aria-hidden="true"></span></button>`).join('')}</div>`;
 }
+const onboardingLabel=()=>preferred.size ? `${preferred.size}つのジャンルで本を探す` : '本を探す';
 function renderOnboarding() {
   preferred=new Set(store.snapshot().favoriteGenres);
-  view.innerHTML=`<section class="onboarding"><p class="onboarding-kicker">あなたの読書手帖</p><h1>どんな本を<br>読みたい？</h1><p class="muted">好きなジャンルから、本と出会う。<br>いくつでも選べます。</p><div id="preference-choices">${genreChoices()}</div><button type="button" class="primary onboarding-next" data-act="preferences-save">本を探す ${icon('arrow')}</button><p class="onboarding-note">本棚は、あなたが登録した本から始まります。</p></section>`;
+  view.innerHTML=`<section class="onboarding"><p class="onboarding-kicker">あなたの読書手帖</p><h1>どんな本を<br>読みたい？</h1><p class="onboarding-lead">好きなジャンルを選ぶと、おすすめの本が届きます。いくつでも選べます。</p><div id="preference-choices">${genreChoices()}</div><div class="onboarding-foot"><button type="button" class="primary onboarding-next" data-act="preferences-save">${onboardingLabel()}</button><p class="onboarding-note">本棚は、あなたが登録した本から始まります。</p></div></section>`;
   $('#fab').hidden=true;
-}
-function openPreferences() {
-  stopBookPreview();flushMemo();stopScanning();openId=null;editingPreferences=true;
-  preferred=new Set(store.snapshot().favoriteGenres);
-  sheetBody.innerHTML=`<h2 class="sheet-title">好みのジャンル</h2><p class="muted">複数選べます。おすすめに反映します。</p><div id="preference-choices">${genreChoices()}</div><button type="button" class="primary onboarding-next" data-act="preferences-save">保存する</button>`;
-  showSheet();sheetBody.scrollTop=0;
 }
 
 // ---------------------------------------------------------------- 画面切り替え
@@ -2129,9 +2159,9 @@ store.subscribe((ev) => {
 // ---------------------------------------------------------------- 操作
 const actions = {
   'backup-preview':showBackupPreview,
-  'preferences':openPreferences,
-  'preference-toggle':el=>{const id=el.dataset.v;preferred.has(id)?preferred.delete(id):preferred.add(id);$('#preference-choices').innerHTML=genreChoices();$('#preference-choices [data-v="'+id+'"]')?.focus();},
-  'preferences-save':()=>{store.setFavoriteGenres([...preferred]);recState=null;ui.searchQ='';ui.recShift=(ui.recShift || 0)+1;saveUi();if(editingPreferences){editingPreferences=false;closeSheet();}if(location.hash!=='#search')location.hash='#search';else render();},
+  'preference-toggle':el=>{const id=el.dataset.v;preferred.has(id)?preferred.delete(id):preferred.add(id);$('#preference-choices').innerHTML=genreChoices();const next=$('.onboarding-next');if(next)next.textContent=onboardingLabel();$('#preference-choices [data-v="'+id+'"]')?.focus({preventScroll:true});},
+  // おすすめは検索タブを開くたびに入れ替わるので、好みを後から変える画面は置かない（v0.15 本人：「好みを変更」はいらない）
+  'preferences-save':()=>{store.setFavoriteGenres([...preferred]);recState=null;ui.searchQ='';ui.recShift=(ui.recShift || 0)+1;saveUi();if(location.hash!=='#search')location.hash='#search';else render();},
   'versions': renderVersionHistory,
   'work-detail': el=>previewWork(workCache.get(el.dataset.key)),
   'series-vol': (el) => {

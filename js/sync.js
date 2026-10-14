@@ -62,6 +62,17 @@ export function mergeSyncData(local, remote) {
   const followList = [...follows.entries()].filter(([k, f]) => !unfollowed[k] || (f.followedAt || '') > unfollowed[k]).map(([, f]) => f);
   const readLog = {};
   for (const src of [remote.readLog, local.readLog]) for (const [d, ids] of Object.entries(src || {})) readLog[d] = union(readLog[d], ids);
+  // 新刊の一覧（v0.15）：両方の端末で見つけた本を合わせる。同じ本は最後に確かめた方、見つからなくなった印より古い本と「表示しない」本は外す
+  const releaseGone = mergeMarks(remote.releaseGone, local.releaseGone);
+  const dismissed = union(local.dismissed, remote.dismissed);
+  const relStamp = (r) => r.confirmedAt || (r.foundAt ? `${r.foundAt}T00:00:00.000Z` : '');
+  const rel = new Map();
+  for (const r of [...(remote.releases || []), ...(local.releases || [])]) {
+    const prev = rel.get(r.key);
+    rel.set(r.key, !prev ? r : relStamp(r) >= relStamp(prev) ? { ...r, seen: !!(r.seen || prev.seen) } : { ...prev, seen: !!(r.seen || prev.seen) });
+  }
+  const hidden = new Set(dismissed);
+  const releases = [...rel.values()].filter((r) => !hidden.has(r.key) && !(releaseGone[r.key] && releaseGone[r.key] > relStamp(r)));
   return {
     favoriteGenres: ((local.preferencesAt || '') === (remote.preferencesAt || '')
       ? (JSON.stringify(local.favoriteGenres || []) >= JSON.stringify(remote.favoriteGenres || []) ? local.favoriteGenres : remote.favoriteGenres)
@@ -70,7 +81,7 @@ export function mergeSyncData(local, remote) {
     onboardingDone: !!(local.onboardingDone || remote.onboardingDone || books.length),
     books, removed, deletedSeedIds, seedVersion: Math.max(local.seedVersion || 0, remote.seedVersion || 0),
     follows: followList, unfollowed,
-    dismissed: union(local.dismissed, remote.dismissed), hiddenRecs: union(local.hiddenRecs, remote.hiddenRecs),
+    dismissed, hiddenRecs: union(local.hiddenRecs, remote.hiddenRecs), releases, releaseGone,
     readLog, manualReadDays: union(local.manualReadDays, remote.manualReadDays), goals: { ...(remote.goals || {}), ...(local.goals || {}) },
   };
 }

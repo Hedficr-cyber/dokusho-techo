@@ -89,6 +89,31 @@ export const GENRES = [
     id: 'nonfic', name: 'ノンフィクション', desc: '事件・記録・ルポ',
     ndc: ['368.6', '916'],
   },
+  // v0.15：初めて開いたときに選べる大まかなジャンルを 12 に（本人「10 個ぐらいあっていい」）
+  {
+    id: 'sf', name: 'SF・ファンタジー', desc: '宇宙・未来・異世界の物語',
+    authors: ['小川一水', '伊藤計劃', '円城塔', '宮内悠介', '上田早夕里', '野﨑まど', '冲方丁', '上橋菜穂子', '小野不由美', '森見登美彦'],
+  },
+  {
+    id: 'seishun', name: '恋愛・青春', desc: '恋、友情、ほろ苦い青春',
+    authors: ['住野よる', '河野裕', '汐見夏衛', '宇山佳佑', '三秋縋', '佐野徹夜', '有川ひろ', '瀬尾まいこ', '一条岬', '額賀澪'],
+  },
+  {
+    id: 'jidai', name: '歴史・時代', desc: '戦国・幕末・江戸の人間ドラマ',
+    authors: ['今村翔吾', '澤田瞳子', '和田竜', '朝井まかて', '木下昌輝', '垣根涼介', '司馬遼太郎', '池波正太郎', '海道龍一朗'],
+  },
+  {
+    id: 'light', name: 'ライト文芸', desc: 'あやかし・お仕事・日常の謎',
+    authors: ['望月麻衣', '浅葉なつ', '友麻碧', '三上延', '白川紺子', '木崎ちあき', '似鳥航一', '岡崎琢磨', '仁科裕貴'],
+  },
+  {
+    id: 'essay', name: 'エッセイ', desc: '日々のこと、ことばの楽しみ',
+    authors: ['さくらももこ', '群ようこ', '岸本佐知子', '穂村弘', '星野源', '若林正恭', '小川糸', '益田ミリ'],
+  },
+  {
+    id: 'kyoyo', name: '教養・サイエンス', desc: '科学、からだ、生きものの不思議',
+    authors: ['福岡伸一', '稲垣栄洋', '池谷裕二', '更科功', '長谷川英祐', '小林武彦'],
+  },
 ];
 
 // 大分類は入口、細かなジャンルと本の特徴は次の画面で選ぶ。
@@ -99,7 +124,15 @@ export const GENRE_GROUPS = [
   { id:'money', name:'投資・お金', desc:'投資、資産形成、お金の知識', children:['money'] },
   { id:'business', name:'ビジネス', desc:'仕事、考え方、学び', children:['business'] },
   { id:'nonfic', name:'ノンフィクション', desc:'実話、記録、ルポ', children:['nonfic'] },
+  { id:'sf', name:'SF・ファンタジー', desc:'宇宙、未来、異世界', children:['sf'] },
+  { id:'romance', name:'恋愛・青春', desc:'恋、友情、青春', children:['seishun'] },
+  { id:'history', name:'歴史・時代', desc:'戦国、幕末、江戸', children:['jidai'] },
+  { id:'light', name:'ライト文芸', desc:'あやかし、お仕事、日常の謎', children:['light'] },
+  { id:'essay', name:'エッセイ', desc:'日々のこと、ことば', children:['essay'] },
+  { id:'kyoyo', name:'教養・サイエンス', desc:'科学、からだ、生きもの', children:['kyoyo'] },
 ];
+// 初めて開いたときのジャンルの並び（物語 → 実用）
+export const GENRE_GROUP_ORDER = ['mystery','horror','fiction','sf','romance','history','light','essay','nonfic','kyoyo','business','money'];
 export const GENRE_GROUP_BY_ID = Object.fromEntries(GENRE_GROUPS.map((g) => [g.id,g]));
 export const GENRE_BY_ID = Object.fromEntries(GENRES.map((g) => [g.id,g]));
 export function belongsToGenre(book, id) {

@@ -633,16 +633,25 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .series-reset { display:flex; flex-wrap:wrap; gap:4px 18px; }
 .search-scan { width:100%; justify-content:center; margin:0 0 14px; min-height:56px; padding:12px 16px; border-radius:15px; background:transparent; border:1px solid var(--ink); font-weight:600; box-shadow:none; }
 .sync-panel .sync-card { margin:18px 0 0; border:0; padding:0; background:transparent; box-shadow:none; }
-.onboarding { max-width:560px; margin:16px auto; }
-.onboarding-kicker { font-size:12px; color:var(--ink-2); letter-spacing:.1em; margin-bottom:20px; }
-.onboarding h1 { font-size:clamp(32px,8vw,44px); line-height:1.4; font-weight:600; letter-spacing:.02em; margin-bottom:16px; }
-.preference-genres { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:28px 0; }
-.preference-genre { display:flex; align-items:center; justify-content:space-between; gap:6px; min-height:60px; border-radius:12px; border:1px solid var(--line); background:var(--surface); padding:12px; text-align:left; font-size:13px; }
-.preference-genre.on { border-color:var(--ink); background:var(--accent-soft); font-weight:600; }
-.preference-check { color:var(--ink-2); font-size:15px; }
-.onboarding-next { width:100%; display:flex; align-items:center; justify-content:center; gap:14px; min-height:50px; border-radius:12px; }
-.onboarding-note { margin:16px 0; text-align:center; color:var(--ink-2); font-size:11px; }
-@media(max-width:360px) { .preference-genre { padding:10px 8px; font-size:12px; } }
+/* 初めて開いたときの画面：ジャンルのカード 12 枚（2 列）と、下のナビの上に固定した「本を探す」 */
+.onboarding { max-width:560px; margin:8px auto 0; }
+.onboarding-kicker { font-size:12px; color:var(--ink-2); letter-spacing:.1em; margin-bottom:16px; }
+.onboarding h1 { font-size:clamp(30px,8vw,42px); line-height:1.35; font-weight:700; letter-spacing:.02em; margin-bottom:12px; }
+.onboarding-lead { font-size:13px; line-height:1.8; color:var(--ink-2); }
+.preference-genres { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:24px 0 8px; }
+.preference-genre { position:relative; display:flex; align-items:center; min-height:72px; padding:12px 30px 12px 14px; border-radius:16px; border:1px solid var(--line); background:var(--surface); color:inherit; text-align:left; transition:border-color .2s,box-shadow .2s; }
+.pg-text { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.pg-name { font-size:14px; font-weight:700; line-height:1.4; white-space:nowrap; letter-spacing:-.01em; }
+.pg-desc { font-size:11px; line-height:1.45; color:var(--ink-2); }
+.pg-check { position:absolute; top:10px; right:10px; width:20px; height:20px; border-radius:50%; border:1.5px solid var(--line); display:grid; place-items:center; transition:background .2s,border-color .2s; }
+.preference-genre.on { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+.preference-genre.on .pg-check { background:var(--ink); border-color:var(--ink); }
+.preference-genre.on .pg-check::after { content:"✓"; color:var(--paper); font-size:11px; font-weight:700; line-height:1; }
+.onboarding-foot { position:sticky; z-index:3; bottom:calc(94px + env(safe-area-inset-bottom,0px)); padding:18px 0 2px; background:linear-gradient(to bottom,transparent,var(--paper) 40%); }
+.onboarding-next { width:100%; display:flex; align-items:center; justify-content:center; min-height:54px; border-radius:27px; font-size:15px; font-weight:700; }
+.onboarding-note { margin:10px 0 0; text-align:center; color:var(--ink-2); font-size:11px; }
+@media(max-width:400px) { .pg-name { font-size:13px; } }
+@media(max-width:350px) { .preference-genre { padding:10px 26px 10px 10px; } .pg-name { font-size:12px; } }
 /* ---------------------------------------------------------------- 読書図鑑（記録タブ） */
 .zbar { display:block; height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
 .zbar i { display:block; height:100%; background:var(--ink); border-radius:2px; }
@@ -662,7 +671,8 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .zukan .back-link { margin-bottom:0; }
 .zukan .page-head h1 { font-size:clamp(23px,6.6vw,34px); line-height:1.35; overflow-wrap:anywhere; word-break:auto-phrase; }
 .zukan-intro { font-size:13px; color:var(--ink-2); margin:-10px 0 22px; line-height:1.8; }
-.zukan-checking, .cal-checking { margin:18px 2px 0; }
+.zukan-checking { margin:18px 2px 0; }
+.cal-checking { margin:0 0 12px; padding:10px 14px; border-radius:12px; background:var(--surface); border:1px solid var(--line); font-size:12px; color:var(--ink-2); }
 /* 著者のフォルダ：奥の板とつまみ、のぞくカード、手前の面 */
 .zfolders { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 14px; }
 .zfolder { position:relative; display:block; padding-top:30px; color:inherit; }
@@ -741,3 +751,19 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .merge-list { margin:6px 0; font-size:13px; }
 .merge-list summary { cursor:pointer; min-height:40px; display:flex; align-items:center; }
 .merge-list ol { max-height:260px; overflow:auto; margin:4px 0 8px; padding-left:22px; font-size:12px; line-height:1.9; }
+/* ---------------------------------------------------------------- v0.15 スマホ版の手直し（本人の 10 点） */
+/* ⑦ アプリらしく：文字の長押しで「コピー・調べる・翻訳」や画像の保存のメニューを出さない（入力欄・メモは選べる） */
+body { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+input, textarea, [contenteditable="true"] { -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
+img { -webkit-user-drag:none; -webkit-touch-callout:none; }
+/* ⑩ 指で触れたときに黒い枠を出さない（枠はキーボードで操作するときだけ） */
+@media (hover:none) { button:focus-visible, a:focus-visible, summary:focus-visible, [role=button]:focus-visible { outline:none; } }
+[role=button] { -webkit-tap-highlight-color:transparent; }
+/* ⑨ 閉じるボタンは × だけ（丸い縁と背景をなくす） */
+.sheet-close { border:0; background:transparent; box-shadow:none; color:var(--ink); }
+/* ③ 合言葉の欄などの Caps Lock の印（上矢印）を、縦長ではなく正方形の大きさに */
+input::-webkit-caps-lock-indicator { width:18px; height:18px; align-self:center; margin-left:6px; }
+/* ④ 記録の年の切り替えは、説明の下に横長のボタンで */
+.history-intro { flex-direction:column; align-items:flex-start; gap:12px; }
+.history-years { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; }
+.history-years .genre-filter { min-width:0; min-height:36px; padding:6px 18px; border-radius:18px; white-space:nowrap; line-height:1.4; }

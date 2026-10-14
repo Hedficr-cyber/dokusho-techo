@@ -7,7 +7,8 @@ const KEY = 'dokusho-techo:v1';
 const EMPTY = {
   version: 1, books: [], deletedSeedIds: [], seedVersion: 0, updatedAt: '',
   follows: [],      // フォロー中の作家 { name, addedAt, lastChecked }
-  releases: [],     // 見つかった新刊・近刊 { key, title, author, month, publisher, isbn, link, ndc, foundAt, seen }
+  releases: [],     // 見つかった新刊・近刊 { key, title, author, month, publisher, isbn, link, ndc, foundAt, confirmedAt, seen }
+  releaseGone: {},  // 同期用：確かめ直して見つからなくなった新刊 { key: 外した時刻 }（ほかの端末から戻さない）
   dismissed: [],    // 「表示しない」にした新刊の key
   hiddenRecs: [],   // 検索タブのおすすめで「表示しない」にした作品の key
   manualReadDays: [], // 本棚の「今日読んだ」で記録した日。本ごとの記録を取り消しても残す
@@ -40,7 +41,7 @@ export function load() {
     diskRaw=raw;
     // v0.7 までに点字版などの記録から新刊として拾ったもの（例：恋のゴンドラ）を外す
     // 本棚のシリーズの巻は、点字版の記録しかなくても続巻として残す（シリーズ側で古い巻を除いている）
-    state.releases = state.releases.filter((r) => r.series || isPrintRecord(r));
+    state.releases = state.releases.filter((r) => (r.series || isPrintRecord(r)) && !isDigitalEdition(r.title));
   } catch {
     /* 読めないときは空の本棚で始める */
   }
@@ -163,11 +164,11 @@ export function prepareBackup(data) {
   const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading','seriesPreviousStatus','seriesName'];
   // 同期用の印：{ キー: 時刻の文字列 }
   const stampMap=(v)=>v==null || (typeof v==='object' && !Array.isArray(v) && Object.values(v).every(x=>typeof x==='string'));
-  if (!stampMap(data.removed) || !stampMap(data.unfollowed)) invalid();
+  if (!stampMap(data.removed) || !stampMap(data.unfollowed) || !stampMap(data.releaseGone)) invalid();
   if (data.books.some(b=>!optionalStrings(b,bookStrings) || !optionalNumbers(b,['rating','priority'])
     || !stringArray(b,'genres') || !stringArray(b,'coverIsbns')
     || (b.photos!=null && (!Array.isArray(b.photos) || b.photos.some(x=>!Number.isInteger(x)))))) invalid();
-  if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt','series']) || !stringArray(r,'coverIsbns'))) invalid();
+  if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt','series','foundAt','confirmedAt']) || !stringArray(r,'coverIsbns'))) invalid();
   if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt','followedAt']) || (f.auto!=null && typeof f.auto!=='boolean'))) invalid();
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
   if (Object.entries(data.readLog || {}).some(([d, ids]) => !isDate(d) || !Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) invalid();
@@ -190,6 +191,10 @@ export function prepareBackup(data) {
   // 「元に戻す」は削除より新しい modifiedAt を持つので維持する（同期と同じ判定）。
   next.removed ||= {};
   next.unfollowed ||= {};
+  next.releaseGone ||= {};
+  // 新刊：電子の分冊版などは出さない。見つからなくなった印より古いものは外す（同期で戻ってきた分も）
+  const relStamp = (r) => r.confirmedAt || (r.foundAt ? `${r.foundAt}T00:00:00.000Z` : '');
+  next.releases = (next.releases || []).filter((r) => !isDigitalEdition(r.title) && !(next.releaseGone[r.key] && next.releaseGone[r.key] > relStamp(r)));
   const gone=new Set(next.deletedSeedIds);
   const stamp=b=>b.modifiedAt || (b.updatedAt ? `${b.updatedAt}T00:00:00.000Z` : '') || (b.addedAt ? `${b.addedAt}T00:00:00.000Z` : '');
   next.books=next.books.filter(b=>next.removed[b.id] ? stamp(b)>next.removed[b.id] : !gone.has(b.id));
@@ -200,7 +205,8 @@ export function prepareBackup(data) {
 
 // ---------------------------------------------------------------- 同期（js/sync.js）
 // 端末の間でそろえる項目。新刊の一覧・表紙の照合・自動フォローは各端末で作り直すので送らない
-const SYNC_FIELDS = ['books', 'removed', 'deletedSeedIds', 'seedVersion', 'favoriteGenres', 'preferencesAt', 'onboardingDone', 'follows', 'unfollowed', 'dismissed', 'hiddenRecs', 'readLog', 'manualReadDays', 'goals'];
+// v0.15：新刊の一覧（releases）も送る（端末ごとに集めると冊数がずれるため。確かめ直して外した印 releaseGone も）
+const SYNC_FIELDS = ['books', 'removed', 'deletedSeedIds', 'seedVersion', 'favoriteGenres', 'preferencesAt', 'onboardingDone', 'follows', 'unfollowed', 'dismissed', 'hiddenRecs', 'readLog', 'manualReadDays', 'goals', 'releases', 'releaseGone'];
 export function syncPayload() {
   refreshStoredState();
   const data = {};
@@ -309,11 +315,16 @@ export function unfollow(name) {
 
 export const releases = () => state.releases;
 
+// 電子書籍の分冊版・単話版（紙の本ではない）
+export const isDigitalEdition = (title) => /分冊版|単話版|電子版|【電子|話売り/.test(String(title || ''));
 function mergeReleases(items) {
+  items = items.filter((r) => !isDigitalEdition(r.title));
   const have = new Set(state.releases.map((r) => r.key));
   const gone = new Set(state.dismissed);
   const fresh = items.filter((r) => !have.has(r.key) && !gone.has(r.key));
-  state.releases.push(...fresh.map((r) => ({ ...r, foundAt: today(), seen: false })));
+  const now = new Date().toISOString();
+  state.releases.push(...fresh.map((r) => ({ ...r, foundAt: today(), confirmedAt: now, seen: false })));
+  for (const it of items) { const r = state.releases.find((x) => x.key === it.key); if (r) { r.confirmedAt = now; delete state.releaseGone[it.key]; } }
   // 前に見つけた本も、あとから ISBN・発売日が登録されたり別の版の表紙が見つかったりしたら書き足す
   for (const it of items) {
     const old = state.releases.find((r) => r.key === it.key);
@@ -339,7 +350,12 @@ export function addReleases(name, items, { window = '', complete = false } = {})
   const n = mergeReleases(items);
   if (window && complete && items.length) {
     const keys = new Set(items.map((r) => r.key));
-    state.releases = state.releases.filter((r) => r.series || normName(r.author) !== normName(name) || keys.has(r.key) || (r.month || '') < window);
+    const now = new Date().toISOString();
+    state.releases = state.releases.filter((r) => {
+      const keep = r.series || normName(r.author) !== normName(name) || keys.has(r.key) || (r.month || '') < window;
+      if (!keep) state.releaseGone[r.key] = now; // ほかの端末の同期で戻さない
+      return keep;
+    });
   }
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f) f.lastChecked = new Date().toISOString();

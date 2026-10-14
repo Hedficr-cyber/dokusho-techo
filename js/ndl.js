@@ -197,6 +197,35 @@ export async function searchAuthor(name, { from, priority=2, keep=true } = {}) {
   return groupWorks(own).sort((a, b) => b.firstYear - a.firstYear);
 }
 
+// バーコードで読んだ本を、まず openBD（出版社の登録情報。すぐ返る）で。見つからなければ null（呼び出し側が国立国会図書館へ）
+// 送るのは ISBN だけ（本人の許可の範囲）。返ってきた文字はすべて文字列として扱い、表示側で esc する
+export async function openBdSummary(isbn, { signal } = {}) {
+  if (!/^97[89]\d{10}$/.test(isbn)) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  const stop = () => ctrl.abort();
+  signal?.addEventListener('abort', stop);
+  try {
+    const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${isbn}`, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    const s = (await res.json())?.[0]?.summary;
+    if (!s || typeof s.title !== 'string' || !s.title.trim()) return null;
+    const str = (v) => (typeof v === 'string' ? v.trim() : '');
+    // 「知念実希人／著」「桃戸ハル／編著」→ 最初の著者の名前だけ
+    const author = str(s.author).split(/[／/,，、]/)[0].replace(/\s*(著|作|文|編|編著|監修|原作|訳|著者)$/, '').replace(/\s+/g, '');
+    const pub = str(s.pubdate).replace(/\D/g, '');
+    return {
+      title: str(s.title), volume: str(s.volume), author, publisher: str(s.publisher), year: pub.slice(0, 4),
+      publishedAt: pub.length >= 8 ? `${pub.slice(0, 4)}-${pub.slice(4, 6)}-${pub.slice(6, 8)}` : pub.length >= 6 ? `${pub.slice(0, 4)}-${pub.slice(4, 6)}` : '',
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', stop);
+  }
+}
+
 export async function searchIsbn(isbn) {
   const items = await query({ isbn, dpid: null, cnt: 10 });
   return groupWorks(items.filter((it) => it.isbn === isbn), { includeComics: true })[0] || null;

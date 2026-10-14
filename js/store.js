@@ -1,7 +1,7 @@
 // 本棚データの保存先。いまはこの端末のブラウザ（localStorage）に保存する。
 // 後でクラウド同期にするときは、このファイルの load/save だけを差し替える。
 import { GENRE_GROUP_BY_ID } from './genres.js';
-import { uid, today, normName, isPrintRecord } from './util.js';
+import { uid, today, normName, normTitle, isPrintRecord } from './util.js';
 
 const KEY = 'dokusho-techo:v1';
 const EMPTY = {
@@ -224,6 +224,47 @@ export function replaceAll(data) {
   const next = prepareBackup(data);
   state = { ...next, updatedAt: '' };
   save();
+}
+
+// 「本を追加で読み込む」：ファイルの本を、いまの本棚に足す（置き換えない・消さない）。
+// 同じ本（同じ id・ISBN、または同じ書名と著者）は重ねない。ファイルで読了なら、本棚の本も読了にする（読了日はファイルの日付、なければ空）
+function mergeActions(list) {
+  const key = (b) => `${normTitle(b.title)}|${normName(b.author)}`;
+  const byId = new Map(state.books.map((b) => [b.id, b]));
+  const byIsbn = new Map(state.books.filter((b) => b.isbn).map((b) => [b.isbn, b]));
+  const byKey = new Map(state.books.map((b) => [key(b), b]));
+  const plan = [];
+  for (const inc of list) {
+    const local = byId.get(inc.id) || (inc.isbn && byIsbn.get(inc.isbn)) || byKey.get(key(inc));
+    if (local) { plan.push({ type: inc.status === 'done' && local.status !== 'done' ? 'read' : 'same', inc, local }); continue; }
+    plan.push({ type: 'add', inc });
+    byId.set(inc.id, inc); byKey.set(key(inc), inc); if (inc.isbn) byIsbn.set(inc.isbn, inc); // ファイルの中の重複も 1 冊に
+  }
+  return plan;
+}
+export function planMerge(data) {
+  refreshStoredState();
+  const plan = mergeActions(prepareBackup(data).books);
+  const count = (t) => plan.filter((p) => p.type === t);
+  return { add: count('add').map((p) => p.inc), read: count('read').map((p) => p.local), same: count('same').length };
+}
+export function mergeBooks(data) {
+  refreshStoredState();
+  const plan = mergeActions(prepareBackup(data).books);
+  const stamp = new Date().toISOString();
+  const added = [];
+  for (const p of plan) {
+    if (p.type === 'read') Object.assign(p.local, { status: 'done', finishedAt: p.inc.finishedAt || p.local.finishedAt || '', updatedAt: today(), modifiedAt: stamp });
+    if (p.type !== 'add') continue;
+    const b = { ...p.inc, updatedAt: today(), modifiedAt: stamp };
+    delete state.removed[b.id]; // 以前に消した本でも、本人が読み込んだら戻す
+    state.deletedSeedIds = state.deletedSeedIds.filter((x) => x !== b.id);
+    added.push(b);
+  }
+  state.books.unshift(...added); // ファイルの順のまま、本棚の先頭に
+  const result = { added: plan.filter((p) => p.type === 'add').length, read: plan.filter((p) => p.type === 'read').length };
+  if (result.added || result.read) save();
+  return result;
 }
 
 // ---------------------------------------------------------------- 作家のフォローと新刊

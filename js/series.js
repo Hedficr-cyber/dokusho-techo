@@ -23,11 +23,15 @@ export function volumeNumber(raw) {
   const s = String(raw ?? '').trim();
   if (ROMAN[s]) return ROMAN[s];
   const t = s.normalize('NFKC');
-  const d = t.match(/^(?:第\s*)?(?:(?:vol\.?|act|no\.?|part|#)\s*)?(\d{1,3})\s*(?:巻|部)?$/i);
+  // NDL の巻次「3 (密室のパラノイア)」は巻数と書名
+  const d = t.match(/^(?:第\s*)?(?:(?:vol\.?|act|no\.?|part|#)\s*)?(\d{1,3})\s*(?:巻|部)?(?:\s*\(.+\))?$/i);
   if (d) return Number(d[1]);
   const k = t.match(/^第?([一二三四五六七八九十])巻$/);
   return k ? KANJI[k[1]] : 0;
 }
+
+// 半角のローマ数字（「ACT II」「invert II」）。I・V・X の 1 文字は「ACT」などが前にあるときだけ巻数とみなす
+const ASCII_ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
 
 // 書名（と NDL の巻次）を、シリーズ名と巻数に分ける。巻数がなければ vol: 0
 export function splitVolume(title, volume = '') {
@@ -36,9 +40,15 @@ export function splitVolume(title, volume = '') {
   if (fromField) return { base: main, vol: fromField };
   const roman = main.match(/^(.+?)[\s　]*([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ])$/);
   if (roman && hasBody(roman[1])) return { base: roman[1].trim(), vol: ROMAN[roman[2]] };
+  const t = main.normalize('NFKC');
+  const ar = t.match(/^(.+?[^\s])\s+(act|vol\.?|part)?\s*(II|III|IV|VI|VII|VIII|IX|I|V|X)$/i);
+  if (ar && hasBody(ar[1]) && (ar[2] || ar[3].length > 1) && ASCII_ROMAN[ar[3].toUpperCase()]) return { base: ar[1].trim(), vol: ASCII_ROMAN[ar[3].toUpperCase()] };
   // 巻数の直前は数字以外（「Another 2001」の「2001」は 4 桁なので巻数にしない）
-  const m = main.normalize('NFKC').match(/^(.*?[^\d\s])[\s・:\-]*(?:第\s*)?(?:(?:vol\.?|act|no\.?|part|#)\s*)?(\d{1,3})(?:\s*巻)?$/i);
+  const m = t.match(/^(.*?[^\d\s])[\s・:\-]*(?:第\s*)?(?:(?:vol\.?|act|no\.?|part|#)\s*)?(\d{1,3})(?:\s*巻)?$/i);
   if (m && hasBody(m[1]) && Number(m[2]) > 0) return { base: m[1].replace(/[\s・:\-]+$/, '').trim(), vol: Number(m[2]) };
+  // 「5分後に意外な結末 1 赤い悪夢」のように、巻数のあとに副題（「3 日」「2 人」のような数え方は除く）
+  const s = t.match(/^(.*?[^\d\s])\s+(\d{1,3})\s+(?![日年月人つ分回歳度冊巻番話章個本時秒%])(\S.+)$/);
+  if (s && hasBody(s[1]) && Number(s[2]) > 0) return { base: s[1].trim(), vol: Number(s[2]) };
   return { base: main, vol: 0 };
 }
 
@@ -68,7 +78,9 @@ export function catalogMatch(book) {
     if (!catalogAuthor(entry, a)) continue;
     for (const v of entry.vols) {
       for (const k of v.keys) {
-        const score = k === t || k === m ? 1000 + k.length : k.length >= 3 && (t.startsWith(k) || m.startsWith(k)) ? k.length : 0;
+        // 一致 ＞ 末尾が一致（「天久鷹央の推理カルテ 2 ファントムの病棟」）＞ 先頭が一致（「medium 霊媒探偵城塚翡翠」）
+        const score = k === t || k === m ? 1000 + k.length : k.length >= 4 && t.endsWith(k) ? 500 + k.length
+          : k.length >= 3 && (t.startsWith(k) || m.startsWith(k)) ? k.length : 0;
         if (score && (!best || score > best.score)) best = { entry, vol: v, score };
       }
     }
@@ -90,35 +102,66 @@ function storyName(seg) {
   if (!s || LABEL.test(s.normalize('NFKC'))) return '';
   return (s.match(/[぀-ヿ㐀-鿿]/g) || []).length >= 3 ? s : '';
 }
-// 1 作品のシリーズ名の候補と、その作品の書名（巻次「3 (密室のパラノイア)」の本は括弧の中）
+// 読みがな「生命(いのち)の略奪者」は表示しない
+const plain = (s) => String(s ?? '').replace(/[(（][\u3040-\u30ffー・\s]+[)）]/g, '').trim();
+// 1 作品のシリーズ名の候補と、その作品の書名（巻次「3 (密室のパラノイア)」の本は括弧の中）。
+// names：叢書名に書かれたシリーズ名（これだけでシリーズを作れる）
+// extra：巻次「3 (…)」の書名・副題「… : 天久鷹央の事件カルテ」（叢書名で作ったシリーズに足すだけ。
+//        これだけで作ると「京都寺町三条のホームズ 2 (真贋事件簿)」のような巻数のシリーズを書名違いと取り違える）
 export function workStory(w) {
   const names = new Set();
+  const extra = new Set();
   let volTitle = '';
   for (const e of w.editions || []) {
     for (const seg of String(e.series || '').split(/\.\s+/).slice(1)) { const n = storyName(seg); if (n) names.add(n); }
     const vm = String(e.volume || '').normalize('NFKC').match(/^\s*\d{1,3}\s*\((.+)\)\s*$/);
-    if (vm) { const n = storyName(mainTitle(e.title)); if (n) { names.add(n); volTitle ||= vm[1].trim(); } }
+    if (vm) { const n = storyName(mainTitle(e.title)); if (n) { extra.add(n); volTitle ||= vm[1].trim(); } }
+    const sub = String(e.title || '').split(/\s:\s/)[1];
+    if (sub) { const n = storyName(sub); if (n) extra.add(n); }
   }
-  return { names: [...names], title: volTitle || w.main || mainTitle(w.title) };
+  return { names: [...names], extra: [...extra], title: plain(volTitle || w.main || mainTitle(w.title)) };
 }
 // 著者の作品一覧から、題名の違う 2 作品以上をまとめるシリーズ名を見つける
 export function storySeries(works) {
   const byName = new Map();
+  const all = [];
   for (const w of works || []) {
     if (w.isComic || w.isAnthology) continue;
-    const { names, title } = workStory(w);
-    for (const n of names) {
+    const story = workStory(w);
+    all.push([w, story]);
+    for (const n of story.names) {
       const k = normTitle(n);
       if (!byName.has(k)) byName.set(k, { name: n, works: [] });
-      byName.get(k).works.push({ work: w, title });
+      byName.get(k).works.push({ work: w, title: story.title });
+    }
+  }
+  // 巻次・副題のシリーズ名は、叢書名で見つかったシリーズにだけ足す（同じ作品は 1 回）
+  for (const [w, story] of all) {
+    for (const n of story.extra) {
+      const g = byName.get(normTitle(n));
+      if (g && !g.works.some((x) => x.work === w)) g.works.push({ work: w, title: story.title });
     }
   }
   return [...byName.values()].filter((g) => new Set(g.works.map((x) => normTitle(x.title))).size >= 2);
 }
-const bookStory = (book, stories) => {
+// 本の書名がシリーズの巻の書名に当たるか。一致 3 点 ＞ 末尾が一致 2 点（「天久鷹央の推理カルテII ファントムの病棟」）
+// ＞ 先頭が一致 1 点（「スフィアの死天使 天久鷹央の事件カルテ」）。部分の一致は 4 文字以上
+function titleScore(book, k) {
   const t = normTitle(book.title);
   const m = normTitle(mainTitle(book.title));
-  return stories.find((g) => g.works.some((x) => { const k = normTitle(x.title); return k === t || k === m; })) || null;
+  if (!k) return 0;
+  if (k === t || k === m) return 3;
+  if (k.length >= 4 && t.endsWith(k)) return 2;
+  if (k.length >= 4 && (t.startsWith(k) || m.startsWith(k))) return 1;
+  return 0;
+}
+const bookStory = (book, stories) => {
+  let best = null;
+  for (const g of stories) for (const x of g.works) {
+    const score = titleScore(book, normTitle(x.title));
+    if (score && (!best || score > best.score)) best = { g, score };
+  }
+  return best?.g || null;
 };
 
 // 端末に覚えておく分：著者の作品一覧のうち、シリーズの巻に当たる作品だけを、必要な項目だけで
@@ -129,7 +172,7 @@ export function seriesWorksOf(works) {
     if (!w.isComic && CATALOG.some((e) => e.vols.some((v) => v.keys.some((k) => w.keys?.includes(k))))) keep.add(w);
   }
   return (works || []).filter((w) => keep.has(w)).map((w) => ({
-    key: w.key, title: w.title, main: w.main, volume: w.volume || '', keys: w.keys || [], ndc: w.ndc || '', creators: w.creators || [],
+    key: w.key, title: w.title, main: w.main, volume: w.volume || '', keys: w.keys || [], isbns: (w.isbns || []).filter(Boolean), ndc: w.ndc || '', creators: w.creators || [],
     authorLabel: w.authorLabel || '', firstYear: w.firstYear || 0, lastMonth: w.lastMonth || '', isComic: !!w.isComic, isAnthology: !!w.isAnthology,
     latest: w.latest ? { isbn: w.latest.isbn || '', publisher: w.latest.publisher || '', link: w.latest.link || '', publishedAt: w.latest.publishedAt || '', issued: w.latest.issued || '', format: w.latest.format || '' } : null,
     editions: (w.editions || []).map((e) => ({ title: e.title || '', volume: e.volume || '', series: e.series || '', isbn: e.isbn || '', month: e.month || '', year: e.year || 0, publishedAt: e.publishedAt || '' })),
@@ -226,7 +269,7 @@ export function seriesVolumesFromWorks(series, works) {
     const split = splitVolume(w.main || w.title, w.volume);
     if (normTitle(split.base) !== base) continue;
     const vol = split.vol || 1;
-    const info = { ...volInfo(w), vol, title: (w.main || w.title) + (w.volume ? ` ${w.volume}` : '') };
+    const info = { ...volInfo(w), vol, title: plain((w.main || w.title) + (w.volume ? ` ${w.volume}` : '')) };
     const prev = vols.get(vol);
     if (!prev || (info.month && (!prev.month || info.month < prev.month))) vols.set(vol, info);
   }
@@ -257,6 +300,10 @@ function describeNamed(series, works) {
     const t = normTitle(book.title);
     const m = normTitle(mainTitle(book.title));
     let it = (pos && items.find((i) => i.pos === pos)) || has(t) || has(m);
+    if (!it) { // 書名の書き方が違う巻（副題つき・シリーズ名つき）は、いちばんよく当たる巻に
+      let best = 0;
+      for (const i of items) for (const k of i.keys) { const sc = titleScore(book, k); if (sc > best) { best = sc; it = i; } }
+    }
     if (!it) {
       items.push(it = { title: mainTitle(book.title), keys: new Set([t, m]), pos: 0, book: null,
         info: { ...volInfo(null), month: (book.publishedAt || '').slice(0, 7) || String(book.year || '') } });

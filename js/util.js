@@ -6,8 +6,8 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 const EDITION_WORDS = /(新装改訂版|改訂完全版|新装版|完全版|決定版|改訂新版|改訂版|新版|文庫版|愛蔵版|\d{4}年版)/g;
 
 // 「噓」「嘘」のような新旧の字形を同じ字として扱う
-const VARIANTS = { '噓': '嘘', '𠮟': '叱', '剝': '剥', '頰': '頬', '塡': '填', '蔣': '蒋', '醬': '醤' };
-const unifyVariants = (s) => s.replace(/[噓𠮟剝頰塡蔣醬]/gu, (c) => VARIANTS[c]);
+const VARIANTS = { '噓': '嘘', '𠮟': '叱', '剝': '剥', '頰': '頬', '塡': '填', '蔣': '蒋', '醬': '醤', '焰': '焔', '蟬': '蝉', '鷗': '鴎', '摑': '掴', '繫': '繋', '惡': '悪' };
+const unifyVariants = (s) => s.replace(/[噓𠮟剝頰塡蔣醬焰蟬鷗摑繫惡]/gu, (c) => VARIANTS[c]);
 
 // 書名の比較用キー。全角英数を半角に、記号と空白を除き、版の表記を外す。
 export function normTitle(s) {
@@ -15,6 +15,7 @@ export function normTitle(s) {
     .normalize('NFKC'))
     .replace(/\s=\s.*$/, '')
     .replace(EDITION_WORDS, '')
+    .replace(/[(（][぀-ヿー・\s]+[)）]/g, '') // 国立国会図書館の読みがな「生命(いのち)の略奪者」「黒猫の小夜曲(セレナーデ)」
     .replace(/[\s・,，、.。:：;；!！?？'"“”「」『』《》〈〉()（）\[\]【】~～\-‐－―ー=＝/／&＆×]/g, '')
     .toLowerCase();
 }

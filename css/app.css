@@ -643,3 +643,86 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .onboarding-next { width:100%; display:flex; align-items:center; justify-content:center; gap:14px; min-height:50px; border-radius:12px; }
 .onboarding-note { margin:16px 0; text-align:center; color:var(--ink-2); font-size:11px; }
 @media(max-width:360px) { .preference-genre { padding:10px 8px; font-size:12px; } }
+/* ---------------------------------------------------------------- 読書図鑑（記録タブ） */
+.zbar { display:block; height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
+.zbar i { display:block; height:100%; background:var(--ink); border-radius:2px; }
+.zcomplete { flex-shrink:0; display:inline-flex; align-items:center; font-size:10px; font-weight:700; letter-spacing:.08em; padding:3px 9px; border-radius:10px; color:var(--paper); background:linear-gradient(120deg,var(--ink) 0%,#5b5b63 48%,var(--ink) 100%); }
+.zukan-entry { display:flex; align-items:center; gap:16px; margin:30px 0 10px; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; }
+.zukan-entry > svg { width:20px; height:20px; flex-shrink:0; color:var(--ink-2); }
+.zukan-entry-art { position:relative; flex-shrink:0; width:70px; height:56px; }
+.zukan-entry-art .cover { position:absolute; bottom:0; width:32px; height:47px; border:2px solid var(--surface); border-radius:4px; box-shadow:0 2px 6px #00000020; background:var(--surface-2); }
+.zukan-entry-art .cover:nth-child(1) { left:0; transform:rotate(-8deg); }
+.zukan-entry-art .cover:nth-child(2) { left:19px; bottom:4px; z-index:1; }
+.zukan-entry-art .cover:nth-child(3) { left:38px; transform:rotate(8deg); }
+.zukan-entry-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.zukan-entry-title { font-size:17px; font-weight:700; }
+.zukan-entry-sub { font-size:12px; color:var(--ink-2); }
+.zukan-entry-count { font-size:12px; color:var(--ink-2); margin-top:4px; }
+.zukan-entry-count b, .zfolder-count b, .zseries-count b { color:var(--ink); font-size:15px; }
+.zukan .back-link { margin-bottom:0; }
+.zukan .page-head h1 { font-size:clamp(23px,6.6vw,34px); line-height:1.35; overflow-wrap:anywhere; word-break:auto-phrase; }
+.zukan-intro { font-size:13px; color:var(--ink-2); margin:-10px 0 22px; line-height:1.8; }
+.zukan-checking { margin:18px 2px 0; }
+/* 著者のフォルダ：奥の板とつまみ、のぞくカード、手前の面 */
+.zfolders { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 14px; }
+.zfolder { position:relative; display:block; padding-top:30px; color:inherit; }
+.zfolder::before { content:""; position:absolute; left:0; right:0; top:12px; bottom:0; background:var(--surface-2); border-radius:6px 16px 16px 16px; box-shadow:inset 0 0 0 1px #00000008; }
+.zfolder::after { content:""; position:absolute; left:0; top:2px; width:46%; height:16px; background:var(--surface-2); border-radius:8px 12px 0 0; }
+.zfolder-cards { position:absolute; z-index:1; top:14px; left:14px; display:flex; gap:5px; }
+.zfolder-cards .cover { width:32px; height:47px; border-radius:3px; box-shadow:0 1px 4px #00000025; }
+.zfolder-cards .cover:nth-child(1) { transform:rotate(-5deg); }
+.zfolder-cards .cover:nth-child(2) { transform:translateY(-4px) rotate(2deg); }
+.zfolder-cards .cover:nth-child(3) { transform:rotate(6deg); }
+.zfolder-face { position:relative; z-index:2; display:flex; flex-direction:column; gap:3px; margin-top:16px; padding:14px 14px 13px; background:var(--surface); border:1px solid var(--line); border-radius:12px 12px 16px 16px; box-shadow:0 -3px 8px #0000000c; }
+.zfolder-name { font-size:15px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+.zfolder-meta { font-size:11px; color:var(--ink-2); }
+.zfolder-count { font-size:12px; color:var(--ink-2); margin:4px 0 2px; }
+/* 著者のシリーズ */
+.zseries-list { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
+.zseries { display:flex; align-items:center; gap:14px; padding:14px 16px; border:1px solid var(--line); border-radius:18px; background:var(--surface); color:inherit; }
+.zseries > svg { width:18px; height:18px; flex-shrink:0; color:var(--ink-2); }
+.zseries-stack { flex-shrink:0; display:flex; width:62px; height:50px; align-items:flex-end; }
+.zseries-stack .cover { width:32px; height:47px; border:2px solid var(--surface); border-radius:4px; box-shadow:0 1px 5px #00000022; }
+.zseries-stack .cover + .cover { margin-left:-17px; }
+.zseries-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.zseries-name { font-size:15px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+.zseries-count { font-size:12px; color:var(--ink-2); }
+/* バインダー：1 ページに 9 枚（3×3）のポケット。読了は濃く、まだ読んでいない巻は薄い点線のカード */
+.binder-head { display:flex; align-items:center; gap:12px; margin-top:-14px; }
+.binder-head .zbar { flex:1; }
+.binder-next { font-size:13px; margin:12px 0 18px; }
+.binder { display:grid; gap:18px; }
+.binder-page { position:relative; padding:12px 12px 14px 26px; border:1px solid var(--line); border-radius:18px; background:var(--surface); }
+.binder-page::before { content:""; position:absolute; left:8px; top:18%; bottom:18%; width:9px; background:radial-gradient(circle,var(--paper) 3.2px,#00000014 3.8px,transparent 4.4px) center / 9px 33.4% repeat-y; }
+.binder-no { position:absolute; right:14px; bottom:4px; font-size:10px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.pockets { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.pocket { aspect-ratio:63/92; padding:4px; border-radius:10px; background:linear-gradient(160deg,#ffffffa6,#ffffff00 42%),var(--surface-2); box-shadow:inset 0 0 0 1px #00000010; }
+.tcard { position:relative; width:100%; height:100%; display:flex; flex-direction:column; padding:5px 5px 6px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:inherit; text-align:left; overflow:hidden; transition:transform .2s,box-shadow .2s; }
+.tcard .cover { width:100%; height:auto; flex:1 1 auto; min-height:0; border-radius:4px; box-shadow:none; }
+.tcard .cover img { object-fit:cover; }
+.tcard .spine-t { font-size:10px; -webkit-line-clamp:4; }
+.tcard-no { position:absolute; z-index:2; top:8px; left:8px; padding:1px 5px; border-radius:6px; font-size:9px; font-weight:700; font-variant-numeric:tabular-nums; background:var(--ink); color:var(--paper); }
+.tcard-title { margin-top:5px; min-height:2.7em; font-size:10.5px; font-weight:600; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.tcard-tag { position:absolute; z-index:2; top:8px; right:8px; padding:1px 5px; border-radius:6px; font-size:9px; font-style:normal; background:var(--surface); border:1px solid var(--ink-2); color:var(--ink); }
+.tcard-read { border-color:var(--ink); box-shadow:0 3px 10px #00000024; }
+.tcard-read::after { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(115deg,transparent 30%,#ffffff40 44%,transparent 58%); }
+.tcard:not(.tcard-read) { background:transparent; border-style:dashed; border-color:var(--ink-2); }
+.tcard:not(.tcard-read) .cover { filter:grayscale(1); opacity:.26; }
+.tcard:not(.tcard-read) .tcard-title { color:var(--ink-2); font-weight:500; }
+.tcard:not(.tcard-read) .tcard-no { background:transparent; color:var(--ink-2); border:1px solid var(--line); }
+@media(hover:hover) { .tcard:hover { transform:translateY(-2px); } }
+.zukan-legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin:16px 2px 4px; font-size:11px; color:var(--ink-2); }
+.zukan-legend span { display:inline-flex; align-items:center; gap:6px; }
+.zukan-legend .lg { display:inline-block; width:11px; height:15px; border-radius:3px; }
+.zukan-legend .lg-read { background:var(--ink); }
+.zukan-legend .lg-unread { border:1px dashed var(--ink-2); }
+.zukan-legend .tcard-tag { position:static; }
+@media(min-width:700px) { .zfolders { grid-template-columns:repeat(3,minmax(0,1fr)); } .binder { grid-template-columns:repeat(2,minmax(0,1fr)); } .tcard-title { font-size:12px; } }
+@media(min-width:1000px) { .zfolders { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(prefers-color-scheme:dark) { .pocket { background:linear-gradient(160deg,#ffffff14,#ffffff00 42%),var(--surface-2); } .zcomplete { background:linear-gradient(120deg,#e8e8ec,#a9a9b0 48%,#e8e8ec); color:#18181b; } }
+@media(prefers-reduced-motion:reduce) { .tcard { transition:none; } }
+/* 本を追加で読み込む */
+.merge-summary { list-style:none; margin:14px 0; padding:0; font-size:14px; line-height:2; }
+.merge-list { margin:6px 0; font-size:13px; }
+.merge-list summary { cursor:pointer; min-height:40px; display:flex; align-items:center; }
+.merge-list ol { max-height:260px; overflow:auto; margin:4px 0 8px; padding-left:22px; font-size:12px; line-height:1.9; }

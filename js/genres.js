@@ -18,6 +18,7 @@ export const SOURCES = {
   release: '新刊通知から',
   series: 'シリーズの続きから',
   manual: '自分で追加',
+  photo: '読んだ本の写真から',
 };
 
 export const PRIORITY = { 3: '本命', 2: '気になる', 1: '見かけた' };

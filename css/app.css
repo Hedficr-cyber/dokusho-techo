@@ -373,7 +373,6 @@ input:not(.search-wrap input),textarea,select { border-radius:12px; }
 .manual-add { margin-top:24px; border-top:1px solid var(--line); padding-top:6px; }
 .manual-add summary { min-height:48px; display:flex; align-items:center; cursor:pointer; color:var(--ink-2); font-size:13px; }
 .manual-add .add-form { padding:8px 0 4px; }
-.history-years { margin:0; justify-content:flex-end; }
 
 /* おすすめ（v0.7）：検索する前に本棚の傾向から表示 */
 .recs { margin-top:26px; }
@@ -656,7 +655,7 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .zbar { display:block; height:4px; border-radius:2px; background:var(--line); overflow:hidden; }
 .zbar i { display:block; height:100%; background:var(--ink); border-radius:2px; }
 .zcomplete { flex-shrink:0; display:inline-flex; align-items:center; font-size:10px; font-weight:700; letter-spacing:.08em; padding:3px 9px; border-radius:10px; color:var(--paper); background:linear-gradient(120deg,var(--ink) 0%,#5b5b63 48%,var(--ink) 100%); }
-.zukan-entry { display:flex; align-items:center; gap:16px; margin:30px 0 10px; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; }
+.zukan-entry { display:flex; align-items:center; gap:16px; margin:0 0 26px; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; }
 .zukan-entry > svg { width:20px; height:20px; flex-shrink:0; color:var(--ink-2); }
 .zukan-entry-art { position:relative; flex-shrink:0; width:70px; height:56px; }
 .zukan-entry-art .cover { position:absolute; bottom:0; width:32px; height:47px; border:2px solid var(--surface); border-radius:4px; box-shadow:0 2px 6px #00000020; background:var(--surface-2); }
@@ -765,7 +764,23 @@ img { -webkit-user-drag:none; -webkit-touch-callout:none; }
 .sheet-close { border:0; background:transparent; box-shadow:none; color:var(--ink); }
 /* ③ 合言葉の欄などの Caps Lock の印（上矢印）を、縦長ではなく正方形の大きさに */
 input::-webkit-caps-lock-indicator { width:18px; height:18px; align-self:center; margin-left:6px; }
-/* ④ 記録の年の切り替えは、説明の下に横長のボタンで */
-.history-intro { flex-direction:column; align-items:flex-start; gap:12px; }
-.history-years { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; }
-.history-years .genre-filter { min-width:0; min-height:36px; padding:6px 18px; border-radius:18px; white-space:nowrap; line-height:1.4; }
+/* ④ 記録：説明の下に、読了した年の棒グラフ（v0.15.2 年のボタンを並べると多すぎる→ 1 行のグラフで選ぶ） */
+.history-intro { flex-direction:column; align-items:stretch; gap:12px; }
+.year-chart { padding:14px 14px 10px; border:1px solid var(--line); border-radius:18px; background:var(--surface); color:var(--ink); }
+.yc-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+.yc-label { font-size:13px; color:var(--ink-2); }
+.yc-label b { margin:0 2px 0 8px; font-size:17px; color:var(--ink); }
+.yc-all { min-height:30px; padding:4px 14px; border:1px solid var(--line); border-radius:15px; background:transparent; color:var(--ink-2); font:inherit; font-size:12px; line-height:1.4; cursor:pointer; }
+.yc-all.on { border-color:var(--ink); background:var(--ink); color:var(--surface); }
+.yc-bars { display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.yc-bars::-webkit-scrollbar { display:none; }
+.yc-bar { flex:1 0 24px; display:flex; flex-direction:column; align-items:center; gap:4px; padding:0; border:0; background:transparent; color:var(--ink-2); font:inherit; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.yc-plot { height:54px; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
+.yc-n { font-size:10px; line-height:1; margin-bottom:3px; font-variant-numeric:tabular-nums; }
+.yc-plot i { display:block; width:min(14px,64%); border-radius:4px 4px 2px 2px; background:var(--ink-2); opacity:.55; transition:opacity .15s, background .15s; }
+.yc-y { font-size:10px; line-height:1.2; font-variant-numeric:tabular-nums; }
+.year-chart:has(.yc-bar.on) .yc-plot i { background:var(--line); opacity:1; }
+.yc-bar.on .yc-plot i { background:var(--ink) !important; }
+.yc-bar.on .yc-n, .yc-bar.on .yc-y { color:var(--ink); font-weight:700; }
+.yc-bar.none { cursor:default; }
+.yc-bar.none .yc-plot i { background:var(--line); opacity:1; }

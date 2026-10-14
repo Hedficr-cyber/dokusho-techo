@@ -1616,7 +1616,8 @@ function renderStats() {
   const all = store.books();
   const done = all.filter((b) => b.status === 'done').sort((a,b) => (b.finishedAt || '').localeCompare(a.finishedAt || ''));
   const years = [...new Set(done.map((b) => (b.finishedAt || '').slice(0,4)).filter(Boolean))].sort().reverse();
-  const shown = ui.historyYear === 'all' ? done : done.filter((b) => (b.finishedAt || '').startsWith(ui.historyYear));
+  const year = years.includes(ui.historyYear) ? ui.historyYear : 'all'; // 選んでいた年の本がなくなったら、すべてを出す
+  const shown = year === 'all' ? done : done.filter((b) => (b.finishedAt || '').startsWith(year));
   let lastMonth = '';
   const rows = shown.map((b) => {
     const month = b.finishedAt ? b.finishedAt.slice(0,7) : 'unknown';
@@ -1631,9 +1632,9 @@ function renderStats() {
   }).join('');
   view.innerHTML = `<section class="history">
     ${pageHead('読書の記録', `${done.length}冊を読了`)}
-    <div class="history-intro"><p>読み終えた本と、その日の記録。</p>${years.length ? `<div class="shelf-genres history-years" role="group" aria-label="記録する年">${[['all', 'すべて'], ...years.map((y) => [y, `${y}年`])].map(([v, l]) => `<button type="button" class="genre-filter ${ui.historyYear === v ? 'on' : ''}" data-act="history-year" data-v="${esc(v)}" aria-pressed="${ui.historyYear === v}">${esc(l)}</button>`).join('')}</div>` : ''}</div>
-    ${rows ? `<ul class="books history-list">${rows}</ul>` : '<div class="empty"><span class="empty-icon">'+icon('book')+'</span><h2>まだ読了の記録がありません</h2><p>本の詳細で「読了」を選ぶと、<br>読み終えた日と一緒にここへ並びます。</p><a href="#shelf" class="primary">本棚を開く</a></div>'}
     ${zukanEntry()}
+    <div class="history-intro"><p>読み終えた本と、その日の記録。</p>${yearChart(done, years, year)}</div>
+    ${rows ? `<ul class="books history-list">${rows}</ul>` : '<div class="empty"><span class="empty-icon">'+icon('book')+'</span><h2>まだ読了の記録がありません</h2><p>本の詳細で「読了」を選ぶと、<br>読み終えた日と一緒にここへ並びます。</p><a href="#shelf" class="primary">本棚を開く</a></div>'}
     <details id="sync-panel" class="backup-panel sync-panel"><summary><span>同期設定</span><span id="sync-label" class="muted">${sync.status().on ? 'オン' : '未設定'}</span></summary><section id="sync-card" class="sync-card">${syncCard()}</section></details>
     <details class="backup-panel"><summary><span>データのバックアップ</span><span class="muted">${all.length}冊</span></summary>
       <p>本棚はこのブラウザに保存されています。別のブラウザやURLへは、バックアップを書き出して移せます。</p>
@@ -1644,6 +1645,36 @@ function renderStats() {
       <p class="muted small">更新 ${esc(localTime(store.snapshot().updatedAt))}</p><button type="button" class="link small" data-act="backup-preview">バックアップの内容を確認</button>
     </details><p class="app-footer">読書手帖 <span>${APP_VERSION}</span><button type="button" class="link" data-act="versions">バージョン履歴</button></p>
   </section>`;
+  // 年が多くて横に収まらないときは、選んだ年（すべてなら新しい年）が見える位置へ
+  const bars = $('.yc-bars');
+  if (bars && bars.scrollWidth > bars.clientWidth) {
+    const on = bars.querySelector('.yc-bar.on');
+    bars.scrollLeft = on ? on.offsetLeft - (bars.clientWidth - on.offsetWidth) / 2 : bars.scrollWidth;
+  }
+}
+
+// 読了した年：年ごとの冊数を 1 行の棒グラフで見せ、棒に触れるとその年の本だけ、「すべて」で全部
+// （v0.15.2 本人：すべて〜2015年のボタンが多すぎる。読了日はそのまま、見せ方だけ変える）
+function yearChart(done, years, year) {
+  if (!years.length) return '';
+  const count = new Map();
+  for (const b of done) { const y = (b.finishedAt || '').slice(0, 4); if (y) count.set(y, (count.get(y) || 0) + 1); }
+  const span = [];
+  for (let y = Number(years.at(-1)); y <= Number(years[0]); y++) span.push(String(y)); // 読まなかった年も、間を空けて並べる
+  const max = Math.max(...count.values());
+  const all = year === 'all';
+  const label = all ? `${years.length > 1 ? `${years.at(-1)}〜${years[0]}` : years[0]}年` : `${year}年`;
+  return `<div class="year-chart">
+    <div class="yc-head"><span class="yc-label">${esc(label)}<b>${all ? done.length : count.get(year)}</b>冊</span>
+      <button type="button" class="yc-all ${all ? 'on' : ''}" data-act="history-year" data-v="all" aria-pressed="${all}">すべて</button></div>
+    <div class="yc-bars" role="group" aria-label="読了した年">${span.map((y) => {
+      const n = count.get(y) || 0;
+      const inner = `<span class="yc-plot">${n ? `<span class="yc-n">${n}</span>` : ''}<i style="height:${n ? 4 + Math.round((n / max) * 34) : 2}px"></i></span><span class="yc-y">${y.slice(2)}</span>`;
+      return n
+        ? `<button type="button" class="yc-bar ${y === year ? 'on' : ''}" data-act="history-year" data-v="${y}" aria-pressed="${y === year}" aria-label="${y}年 ${n}冊">${inner}</button>`
+        : `<span class="yc-bar none" aria-hidden="true">${inner}</span>`;
+    }).join('')}</div>
+  </div>`;
 }
 
 // ---------------------------------------------------------------- 読書図鑑（記録タブ）
@@ -2300,7 +2331,7 @@ const actions = {
   },
 
   'rec-hide': (el) => { store.hideRec(el.dataset.key); },
-  'history-year': (el) => { ui.historyYear = el.dataset.v; saveUi(); renderStats(); },
+  'history-year': (el) => { ui.historyYear = el.dataset.v === ui.historyYear ? 'all' : el.dataset.v; saveUi(); renderStats(); }, // 選んでいる年にもう一度触れると、すべてに戻る
   'toggle-ui': (el) => {
     ui[el.dataset.v] = !ui[el.dataset.v];
     saveUi();

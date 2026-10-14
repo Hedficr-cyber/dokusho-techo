@@ -678,15 +678,27 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .zfolder-meta { font-size:11px; color:var(--ink-2); }
 .zfolder-count { font-size:12px; color:var(--ink-2); margin:4px 0 2px; }
 /* 著者のシリーズ */
-.zseries-list { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
-.zseries { display:flex; align-items:center; gap:14px; padding:14px 16px; border:1px solid var(--line); border-radius:18px; background:var(--surface); color:inherit; }
-.zseries > svg { width:18px; height:18px; flex-shrink:0; color:var(--ink-2); }
-.zseries-stack { flex-shrink:0; display:flex; width:62px; height:50px; align-items:flex-end; }
-.zseries-stack .cover { width:32px; height:47px; border:2px solid var(--surface); border-radius:4px; box-shadow:0 1px 5px #00000022; }
-.zseries-stack .cover + .cover { margin-left:-17px; }
-.zseries-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
-.zseries-name { font-size:15px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+/* 1 シリーズ＝1 枚のカード。上にバインダーの中身（小さなカード）、下に名前と読了の数 */
+.zseries-list { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); gap:16px; }
+.zseries { height:100%; display:flex; flex-direction:column; gap:14px; padding:14px 14px 12px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; transition:transform .2s,box-shadow .2s; }
+@media(hover:hover) { .zseries:hover { transform:translateY(-2px); box-shadow:0 8px 22px #27272e14; } }
+.zseries-strip { display:flex; gap:6px; padding:10px; border-radius:13px; background:linear-gradient(160deg,#ffffffa6,#ffffff00 46%),var(--surface-2); box-shadow:inset 0 0 0 1px #00000010; }
+.zmini { position:relative; flex:0 0 auto; width:calc((100% - 30px) / 6); max-width:60px; aspect-ratio:63/88; padding:2px; border-radius:5px; background:transparent; border:1px dashed var(--ink-2); }
+.zmini .cover { width:100%; height:100%; border-radius:3px; box-shadow:none; filter:grayscale(1); opacity:.26; }
+.zmini .cover img { object-fit:cover; }
+.zmini .spine-t { display:none; }
+.zmini.on { background:var(--surface); border:1px solid var(--ink); box-shadow:0 2px 6px #00000024; }
+.zmini.on .cover { filter:none; opacity:1; }
+.zmini i { position:absolute; z-index:1; top:3px; left:3px; padding:0 3px; border-radius:4px; font-size:8px; font-style:normal; font-weight:700; line-height:13px; font-variant-numeric:tabular-nums; background:var(--surface); color:var(--ink-2); }
+.zmini.on i { background:var(--ink); color:var(--paper); }
+.zmini-more { display:flex; align-items:center; justify-content:center; border:1px solid var(--line); font-size:11px; font-weight:600; color:var(--ink-2); }
+.zseries-main { display:flex; flex-direction:column; gap:6px; padding:0 4px; }
+.zseries-name { font-size:16px; font-weight:700; line-height:1.4; overflow-wrap:anywhere; }
+.zseries-meta { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .zseries-count { font-size:12px; color:var(--ink-2); }
+.zseries-open { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:auto; padding:8px 4px 0; border-top:1px solid var(--line); font-size:12px; color:var(--ink-2); }
+.zseries-open svg { width:15px; height:15px; }
+@media(prefers-color-scheme:dark) { .zseries-strip { background:linear-gradient(160deg,#ffffff14,#ffffff00 46%),var(--surface-2); } }
 /* バインダー：1 ページに 9 枚（3×3）のポケット。読了は濃く、まだ読んでいない巻は薄い点線のカード */
 .binder-head { display:flex; align-items:center; gap:12px; margin-top:-14px; }
 .binder-head .zbar { flex:1; }

@@ -1668,6 +1668,13 @@ function tradingCard(d, v) {
     <span class="tcard-no">No.${v.vol}</span>${c}${tag}<span class="tcard-title">${esc(name)}</span></button></li>`;
 }
 
+// 著者のページのシリーズ：バインダーの中身を小さなカードで先に見せる（読了は濃く、まだ読んでいない巻は薄い）
+const MINI_CARDS = 6;
+function miniCard(d, v) {
+  const c = v.book ? cover(v.book.title, v.book.isbn, 'xs', v.book.coverIsbns || v.book.coverIsbn || [], d.author) : cover(v.title, v.isbn, 'xs', v.coverIsbns || [], d.author);
+  return `<span class="zmini${cardState(v) === 'read' ? ' on' : ''}">${c}<i>${v.vol}</i></span>`;
+}
+
 let zukanLoading = null;
 let zukanDrawTimer = 0;
 function renderZukan() {
@@ -1700,9 +1707,10 @@ function drawZukan() {
     html = `<a class="back-link" href="${esc(zukanHref())}">‹ 読書図鑑</a>
       ${pageHead(author.name, `${author.read} / ${author.total}冊`)}
       <ul class="zseries-list">${author.series.map((x) => `<li><a class="zseries" href="${esc(zukanHref(author.name, x.key))}">
-        <span class="zseries-stack" aria-hidden="true">${readCovers(x.vols, 3).join('')}</span>
-        <span class="zseries-main"><span class="zseries-name">${esc(x.base)}</span><span class="zseries-count">読了 <b>${x.done}</b> / ${x.total}冊</span>${zbar(x.done, x.total)}</span>
-        ${x.done === x.total ? '<span class="zcomplete">コンプリート</span>' : ''}${icon('arrow')}</a></li>`).join('')}</ul>${checking}`;
+        <span class="zseries-strip" aria-hidden="true">${(x.vols.length > MINI_CARDS ? x.vols.slice(0, MINI_CARDS - 1) : x.vols).map((v) => miniCard(x, v)).join('')}${x.vols.length > MINI_CARDS ? `<span class="zmini zmini-more">+${x.vols.length - MINI_CARDS + 1}</span>` : ''}</span>
+        <span class="zseries-main"><span class="zseries-name">${esc(x.base)}</span>
+          <span class="zseries-meta"><span class="zseries-count">読了 <b>${x.done}</b> / ${x.total}冊</span>${x.done === x.total ? '<span class="zcomplete">コンプリート</span>' : ''}</span>${zbar(x.done, x.total)}</span>
+        <span class="zseries-open">バインダーを開く${icon('arrow')}</span></a></li>`).join('')}</ul>${checking}`;
   } else {
     const read = authors.reduce((s, a) => s + a.read, 0);
     const total = authors.reduce((s, a) => s + a.total, 0);

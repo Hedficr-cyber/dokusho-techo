@@ -96,7 +96,8 @@ function parse(xml) {
 }
 
 // dpid: null を渡すと国会図書館以外（出版社の近刊情報 JPRO など）も含めて探す
-async function query(params, { ttl = TTL_MS, priority=2 } = {}) {
+// keep: false は結果をこの端末に保存しない（呼び出し側が必要な分だけ小さく覚える。保存容量を圧迫しないため）
+async function query(params, { ttl = TTL_MS, priority=2, keep=true } = {}) {
   const merged = { dpid: 'iss-ndl-opac', mediatype: 'books', ...params };
   Object.keys(merged).forEach((k) => merged[k] == null && delete merged[k]);
   const url = `${BASE}?${new URLSearchParams(merged)}`;
@@ -127,7 +128,7 @@ async function query(params, { ttl = TTL_MS, priority=2 } = {}) {
       }
       if (!res.ok) throw new Error(`国立国会図書館サーチがエラーを返しました（${res.status}）。少し待ってからもう一度試してください。`);
       const items = parse(body);
-      cacheSet(url, items);
+      if (keep) cacheSet(url, items);
       return items;
     }
     if (offline) throw new Error('インターネットにつながっていません。通信できる場所でもう一度試してください。');
@@ -182,16 +183,16 @@ function groupWorks(items, { includeComics = false } = {}) {
   return works;
 }
 
-export async function searchAuthor(name, { from, priority=2 } = {}) {
+export async function searchAuthor(name, { from, priority=2, keep=true } = {}) {
   const params = { creator: name, cnt: 200 };
   if (from) params.from = String(from);
   const mine = (items) => items.filter((it) => it.creators.some((c) => authorMatches(c, name))
     || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name)));
-  let own = mine(await query(params,{priority}));
+  let own = mine(await query(params,{priority,keep}));
   // 「ホリー・ジャクソン」のように NDL と表記順が違う名前は、いちばん長い部分（姓）で探し直す
   const longest = [...nameParts(name)].sort((a, b) => b.length - a.length)[0];
   if (!own.length && longest && longest !== normName(name)) {
-    own = mine(await query({ ...params, creator: longest },{priority}));
+    own = mine(await query({ ...params, creator: longest },{priority,keep}));
   }
   return groupWorks(own).sort((a, b) => b.firstYear - a.firstYear);
 }

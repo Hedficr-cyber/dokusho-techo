@@ -2,11 +2,11 @@
 
 export const STATUS = {
   want: { label: '読みたい', short: '読みたい' },
-  tsundoku: { label: '積読', short: '積読' },
   reading: { label: '読書中', short: '読書中' },
   done: { label: '読了', short: '読了' },
 };
-export const STATUS_ORDER = ['want', 'tsundoku', 'reading', 'done'];
+// 積読は v0.13 で廃止（本人：読みたい・読書中・読了の 3 つで十分）。以前の積読は読みたいとして読み込む
+export const STATUS_ORDER = ['want', 'reading', 'done'];
 
 export const SOURCES = {
   hand: '書店で手に取った',

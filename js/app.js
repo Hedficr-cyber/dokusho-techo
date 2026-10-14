@@ -12,7 +12,7 @@ import {
 
 import { loadBookDetails, peekBookDetails, prefetchBookDetails, bookDetailsKey, subscribeBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
-import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries } from './series.js';
+import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES } from './series.js';
 import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
@@ -382,49 +382,86 @@ function emptyShelf(total) {
 
 // ---------------------------------------------------------------- 本棚：シリーズの続き
 const SERIES_TTL = 12 * 3600 * 1000;
-const seriesFetched = new Map(); // シリーズの key → 国会図書館で確かめた巻（この起動中だけ覚える）
+const seriesFetched = new Map(); // 巻数のシリーズの key → 国会図書館で確かめた巻（この起動中だけ覚える）
 const seriesFailed = new Set();
 let seriesLoading = null;
+// 名前のあるシリーズ用：著者ごとの作品のうちシリーズの巻に当たる分（seriesWorksOf）。
+// 7 日間この端末に小さく覚える（同期しない。著者の作品一覧そのものは保存しない＝保存容量を圧迫しない）
+const SERIES_WORKS_KEY = 'dokusho-techo:series-works';
+const SERIES_WORKS_TTL = 7 * 24 * 3600 * 1000;
+const authorWorks = new Map(); // 著者の比較キー → { t, works }
+const authorFailed = new Set();
+try {
+  const okWork = (w) => w && typeof w.main === 'string' && Array.isArray(w.keys) && Array.isArray(w.editions);
+  for (const [k, v] of Object.entries(JSON.parse(localStorage.getItem(SERIES_WORKS_KEY) || '{}'))) {
+    if (v && Number.isFinite(v.t) && Date.now() - v.t < SERIES_WORKS_TTL && Array.isArray(v.works) && v.works.every(okWork)) authorWorks.set(k, v);
+  }
+} catch { /* 壊れていれば読み直す */ }
+function saveAuthorWorks() {
+  try { localStorage.setItem(SERIES_WORKS_KEY, JSON.stringify(Object.fromEntries(authorWorks))); } catch { /* 容量不足なら覚えない（次に開いたとき確かめ直す） */ }
+}
+const storyCache = new WeakMap();
+function seriesStories() {
+  const m = new Map();
+  for (const [k, v] of authorWorks) {
+    if (!storyCache.has(v)) storyCache.set(v, storySeries(v.works));
+    m.set(k, storyCache.get(v));
+  }
+  return m;
+}
+const currentSeries = () => shelfSeries(store.books(), { stories: seriesStories() });
+const fetchedFor = (s) => (s.named ? authorWorks.get(normName(s.author))?.works || null : seriesFetched.get(s.key));
 const VOL_STATE = { done: '読了', shelf: '本棚にあり', missing: 'まだ本棚にない', coming: '発売予定' };
 const volState = (v) => (v.book ? (v.book.status === 'done' ? 'done' : 'shelf') : v.upcoming ? 'coming' : 'missing');
 const releaseDay = (v) => (v.publishedAt ? publicationLabel(v.publishedAt) : monthLabel(v.month));
+// 名前のあるシリーズは巻を書名で、巻数のシリーズは「3巻」で呼ぶ
+const volName = (d, v) => (d.named ? `「${mainTitle(v.title)}」` : `${v.vol}巻`);
+const SERIES_CHIPS = 12; // 名前のあるシリーズの巻はこれより多ければ畳む（ポアロなど）
+const expandedSeries = new Set();
 
 function seriesList() {
   const q = normName(ui.q);
-  return shelfSeries(store.books()).map((s) => describeSeries(s, seriesFetched.get(s.key)))
+  return currentSeries().map((s) => describeSeries(s, fetchedFor(s)))
     .filter(isRealSeries)
-    .filter((d) => !q || normName(`${d.base}${d.author}`).includes(q))
-    .sort((a, b) => Number(!a.next) - Number(!b.next) || a.base.localeCompare(b.base, 'ja'));
+    .filter((d) => !q || normName(`${d.base}${d.author}${d.named ? d.vols.map((v) => v.title).join('') : ''}`).includes(q))
+    // 読み終えていないシリーズ → 本棚に多くあるシリーズ → 名前順
+    .sort((a, b) => Number(!a.next) - Number(!b.next) || ownedCount(b) - ownedCount(a) || a.base.localeCompare(b.base, 'ja'));
 }
+const ownedCount = (d) => d.vols.filter((v) => v.book).length;
 
 function seriesCard(d) {
   const lead = d.next || d.vols[d.vols.length - 1];
   const leadCover = lead.book ? cover(lead.book.title, lead.book.isbn, 's', lead.book.coverIsbns || lead.book.coverIsbn || [], d.author)
     : cover(lead.title, lead.isbn, 's', lead.coverIsbns || [], d.author);
-  const chips = d.vols.map((v) => {
+  const folded = d.named && d.vols.length > SERIES_CHIPS && !expandedSeries.has(d.key);
+  const shown = folded ? d.vols.slice(0, SERIES_CHIPS) : d.vols;
+  const chips = shown.map((v) => {
     const st = volState(v);
-    return `<li><button type="button" class="vol vol-${st}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${v.vol}巻：${VOL_STATE[st]}${st==='done' ? '、タップで読了を取り消す' : v.upcoming && !v.book ? '' : '、タップで読了'}" aria-pressed="${st==='done'}" ${v.upcoming && !v.book ? 'disabled' : ''}><span class="vol-number">${v.vol}</span><span class="vol-unit">巻</span></button></li>`;
-  }).join('');
+    const label = d.named ? `${v.vol}. ${v.title}` : `${v.vol}巻`;
+    const inner = d.named ? `<span class="vol-number">${v.vol}</span><span class="vol-name">${esc(mainTitle(v.title))}</span>` : `<span class="vol-number">${v.vol}</span><span class="vol-unit">巻</span>`;
+    return `<li><button type="button" class="vol vol-${st}${d.named ? ' vol-named' : ''}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${esc(label)}：${VOL_STATE[st]}${st==='done' ? '、タップで読了を取り消す' : v.upcoming && !v.book ? '' : '、タップで読了'}" aria-pressed="${st==='done'}" ${v.upcoming && !v.book ? 'disabled' : ''}>${inner}</button></li>`;
+  }).join('') + (d.named && d.vols.length > SERIES_CHIPS
+    ? `<li><button type="button" class="vol vol-more" data-act="series-more" data-key="${esc(d.key)}" aria-expanded="${!folded}">${folded ? `ほか${d.vols.length - shown.length}冊` : '畳む'}</button></li>` : '');
   const n = d.next;
   let next = '';
-  if (!n) next = `<b>全巻読了</b>`;
-  else if (n.book) next = `次に読む：<b>${n.vol}巻</b>（本棚にあり）`;
-  else if (n.upcoming) next = `次の巻：<b>${n.vol}巻</b> ${esc(releaseDay(n))}発売予定`;
-  else next = `次に読む：<b>${n.vol}巻</b>（まだ本棚にない）`;
+  if (!n) next = `<b>${d.named ? 'すべて読了' : '全巻読了'}</b>`;
+  else if (n.book) next = `次に読む：<b>${esc(volName(d, n))}</b>（本棚にあり）`;
+  else if (n.upcoming) next = `次の巻：<b>${esc(volName(d, n))}</b> ${esc(releaseDay(n))}発売予定`;
+  else next = `次に読む：<b>${esc(volName(d, n))}</b>（まだ本棚にない）`;
   const latest = d.coming.find((v) => v !== n);
-  const action = n && !n.book && n.work ? `<button type="button" class="add-btn" data-act="series-add" data-key="${esc(d.key)}" data-vol="${n.vol}">＋登録</button>`
+  const action = n && !n.book && (n.work || d.named) ? `<button type="button" class="add-btn" data-act="series-add" data-key="${esc(d.key)}" data-vol="${n.vol}">＋登録</button>`
     : n?.book ? `<button type="button" class="ghost small" data-act="open" data-id="${esc(n.book.id)}">開く</button>` : '';
-  return `<li class="series-card" data-reveal-key="${esc(`series:${d.key}`)}">
+  return `<li class="series-card${d.named ? ' named' : ''}" data-reveal-key="${esc(`series:${d.key}`)}">
     <div class="series-head">${leadCover}
       <div class="series-main">
         <h2 class="series-title">${esc(d.base)}</h2>
         <button type="button" class="link series-author" data-act="author" data-name="${esc(d.author)}">${esc(d.author)}</button>
-        <p class="series-progress">読了 <b>${d.done}</b> / ${d.total}巻</p>
+        <p class="series-progress">読了 <b>${d.done}</b> / ${d.total}${d.named ? '冊' : '巻'}</p>
         <div class="series-bar" aria-hidden="true"><i style="width:${d.total ? Math.round((d.done / d.total) * 100) : 0}%"></i></div>
       </div>
     </div>
-    <ol class="series-vols" aria-label="${esc(d.base)}の巻">${chips}</ol>
-    <div class="series-next"><p>${next}${latest ? `<br><span class="muted">最新刊：${latest.vol}巻 ${esc(releaseDay(latest))}発売予定</span>` : ''}</p>${action}</div>
+    <ol class="series-vols" aria-label="${esc(d.base)}の${d.named ? '本' : '巻'}">${chips}</ol>
+    <div class="series-next"><p>${next}${latest ? `<br><span class="muted">最新刊：${esc(volName(d, latest))} ${esc(releaseDay(latest))}発売予定</span>` : ''}</p>${action}</div>
   </li>`;
 }
 
@@ -433,12 +470,15 @@ function drawSeries() {
   if (!box) return;
   const list = seriesList();
   $('#series-count').textContent = `${list.length}シリーズ`;
-  box.innerHTML = `${seriesLoading ? loading(`シリーズの巻を国立国会図書館で確かめています（${seriesLoading.total}件中${seriesLoading.done}件）…`) : ''}
+  const progress = seriesLoading ? `シリーズを国立国会図書館で確かめています（${seriesLoading.total}件中${seriesLoading.done}件）…` : '';
+  // シリーズがすでに並んでいるときは、確かめている途中の表示を下に小さく出す（上の一覧を押し下げない）
+  box.innerHTML = `${progress && !list.length ? loading(progress) : ''}
     ${list.length ? `<ul class="series-list">${list.map(seriesCard).join('')}</ul>
       <p class="series-legend"><span><i class="vol vol-done"></i>読了</span><span><i class="vol vol-shelf"></i>本棚</span><span><i class="vol vol-missing"></i>まだ本棚にない</span><span><i class="vol vol-coming"></i>発売予定</span></p>`
-    : seriesLoading ? '' : `<div class="empty"><p class="empty-title">シリーズの本が見つかりません</p><p>書名の最後に巻数がある本（例：「変な家2」「invert 2」）をシリーズとしてまとめます。</p></div>`}
+    : seriesLoading ? '' : `<div class="empty"><p class="empty-title">シリーズの本が見つかりません</p><p>書名に巻数がある本（例：「変な家2」）や、題名が違っても同じシリーズの本（例：館シリーズ、ガリレオシリーズ）をまとめます。本の詳細の「シリーズ」から自分でまとめることもできます。</p></div>`}
+    ${progress && list.length ? `<p class="muted small series-checking">${esc(progress)}</p>` : ''}
     ${seriesFailed.size && !seriesLoading ? errorBox('一部のシリーズは国立国会図書館に接続できず、本棚にある巻だけを表示しています。') : ''}
-    <p class="source">本棚の本と国立国会図書館サーチの書誌から、同じ著者・同じ書名の巻を数えています。</p>`;
+    <p class="source">本棚の本、国立国会図書館サーチの書誌（巻数・シリーズ名）、よく知られたシリーズの一覧から、同じ著者のシリーズをまとめています。違うときは本の詳細の「シリーズ」で直せます。</p>`;
   prepareBooks(box);
 }
 
@@ -458,13 +498,30 @@ function renderSeriesShelf() {
 
 // 本棚の各シリーズについて、国会図書館で他の巻と発売予定を 1 件ずつ確かめる（画面を離れたら止める）
 // 読み込み中に本棚が変わって描き直しても、読み込みは 1 本だけ動かす（2 本目を始めると数え方が壊れる）
+// 名前のあるシリーズを国会図書館で確かめる著者：名前のあるシリーズの著者と、本棚に 2 冊以上ある著者
+function seriesAuthorsToCheck(groups) {
+  const want = new Map();
+  for (const g of groups) if (g.named) want.set(normName(g.author), g.author);
+  const counts = new Map();
+  for (const b of store.books()) {
+    if (!b.author || b.seriesName === NO_SERIES) continue;
+    const k = normName(b.author);
+    counts.set(k, { n: (counts.get(k)?.n || 0) + 1, name: counts.get(k)?.name || b.author });
+  }
+  for (const [k, { n, name }] of counts) if (n >= 2 && !want.has(k)) want.set(k, name);
+  return [...want].filter(([k]) => !authorWorks.has(k) && !authorFailed.has(k)).map(([, name]) => name);
+}
+
 let seriesRun = null;
 function loadSeriesVolumes() {
   if (seriesRun) return seriesRun;
-  const todo = shelfSeries(store.books()).filter((s) => !seriesFetched.has(s.key));
-  if (!todo.length) return Promise.resolve();
+  const groups = currentSeries();
+  const todo = groups.filter((s) => !s.named && !seriesFetched.has(s.key));
+  const authors = seriesAuthorsToCheck(groups);
+  if (!todo.length && !authors.length) return Promise.resolve();
   seriesFailed.clear();
-  const state = { done: 0, total: todo.length };
+  authorFailed.clear();
+  const state = { done: 0, total: todo.length + authors.length };
   seriesLoading = state;
   drawSeries();
   seriesRun = (async () => {
@@ -479,6 +536,18 @@ function loadSeriesVolumes() {
       state.done += 1;
       drawSeries();
     }
+    for (const name of authors) {
+      if (route.name !== 'shelf' || ui.sort !== 'series') break;
+      const k = normName(name);
+      if (!authorWorks.has(k)) {
+        try {
+          authorWorks.set(k, { t: Date.now(), works: seriesWorksOf(await ndl.searchAuthor(name, { priority: 1, keep: false })) });
+          saveAuthorWorks();
+        } catch { authorFailed.add(k); }
+      }
+      state.done += 1;
+      drawSeries();
+    }
   })().finally(() => {
     if (seriesLoading === state) seriesLoading = null;
     seriesRun = null;
@@ -487,9 +556,16 @@ function loadSeriesVolumes() {
   return seriesRun;
 }
 
-function findSeriesVol(key, vol) {
-  const s = shelfSeries(store.books()).find((x) => x.key === key);
-  return s ? describeSeries(s, seriesFetched.get(s.key)).vols.find((v) => v.vol === Number(vol)) : null;
+function findSeries(key) {
+  const s = currentSeries().find((x) => x.key === key);
+  return s ? describeSeries(s, fetchedFor(s)) : null;
+}
+const findSeriesVol = (key, vol) => findSeries(key)?.vols.find((v) => v.vol === Number(vol)) || null;
+// シリーズの巻を本棚に入れる。名前のあるシリーズは一覧の書名のまま（同じシリーズとしてまとまるように）
+function addSeriesVolume(d, v, status = 'want') {
+  const work = v.work || (d.named ? { main: mainTitle(v.title), volume: '', authorLabel: d.author, editions: [], latest: null, firstYear: 0, ndc: '' } : null);
+  if (!work) return null;
+  return addFromWork(work, { source: 'series', publishedAt: v.publishedAt, author: d.author, status, ...(d.named ? { title: mainTitle(v.title) } : {}) });
 }
 
 // シリーズの新しい巻（最後の巻より後に出た・これから出る巻）を、著書タブの新着とカレンダーに出す。12 時間ごと
@@ -498,7 +574,8 @@ async function checkSeries() {
   if (last && Date.now() - last < SERIES_TTL) return;
   const from = monthsAgo(2);
   const items = [];
-  for (const s of shelfSeries(store.books())) {
+  for (const s of currentSeries()) {
+    if (s.named) continue; // 名前のあるシリーズの新刊は、著者の新刊（自動フォロー）で知らせる
     let vols;
     try {
       vols = seriesVolumesFromWorks(s, await ndl.searchTitle(s.base, s.author, { allSources: true, ttl: SERIES_TTL }));
@@ -532,6 +609,7 @@ function renderSheetBook(id) {
   const b = store.get(id);
   if (!b) { closeSheet(); return; }
   const genresOpen = openId === id && !!$('.genre-select')?.open;
+  const seriesOpen = openId === id && !!$('.series-select')?.open;
   // 同じ本を描き直すとき（評価・状態などを変えたとき）は、表紙とあらすじの要素をそのまま使う（表紙が一瞬消えない）
   const same = openId === id && sheet.open && sheetBody.dataset.bookKey === `${id}|${b.isbn}|${b.title}|${b.author}|${JSON.stringify(b.coverIsbns || b.coverIsbn || [])}`;
   const keepCover = same ? sheetBody.querySelector('.detail-head > .cover') : null;
@@ -568,6 +646,8 @@ function renderSheetBook(id) {
     : `<div class="field"><span class="label">気になり度</span><div class="seg">${seg('set-prio', [[3, '本命'], [2, '気になる'], [1, '見かけた']], b.priority)}</div></div>`}
 
     <details class="field genre-select" ${genresOpen ? 'open' : ''}><summary>ジャンル<span>${esc((b.genres || []).map((id) => GENRE_BY_ID[id]?.name || '').filter(Boolean).join('、') || '未設定')}</span></summary><div class="chips wrap">${GENRES.map((g) => `<button type="button" class="chip small ${b.genres?.includes(g.id) ? 'on' : ''}" data-act="toggle-genre" data-v="${g.id}" aria-pressed="${!!b.genres?.includes(g.id)}">${esc(g.name)}</button>`).join('')}</div></details>
+
+    ${seriesField(b, seriesOpen)}
 
     <label class="field"><span class="label">メモ・感想</span><textarea id="f-memo" rows="4" placeholder="読んだ感想、気になった理由、誰に勧められたか など">${esc(b.memo)}</textarea></label>
 
@@ -609,6 +689,30 @@ function renderSheetBook(id) {
   else loadBookSynopsis(b);
   showSheet();
   sheetBody.scrollTop = scrollTop;
+}
+
+// 本の詳細の「シリーズ」：自動でまとめた名前を見せ、違うときは本人が名前を付ける・まとめない
+function seriesField(b, open) {
+  const groups = currentSeries().map((g) => describeSeries(g, fetchedFor(g))).filter(isRealSeries);
+  const has = (g) => (g.named ? g.members.some((m) => m.book.id === b.id) : [...g.owned.values()].some((x) => x.id === b.id));
+  const current = groups.find(has)?.base || '';
+  const state = b.seriesName === NO_SERIES ? 'まとめない' : current ? `${current}${b.seriesName ? '' : '（自動）'}` : 'なし';
+  const names = [...new Set(groups.filter((g) => normName(g.author) === normName(b.author)).map((g) => g.base))];
+  const reset = b.seriesName === NO_SERIES ? `<button type="button" class="link small" data-act="series-name" data-v="">自動でまとめる</button>`
+    : `${b.seriesName ? `<button type="button" class="link small" data-act="series-name" data-v="">自動に戻す</button>` : ''}${current ? `<button type="button" class="link small" data-act="series-name" data-v="${NO_SERIES}">シリーズにしない</button>` : ''}`;
+  return `<details class="field series-select" ${open ? 'open' : ''}><summary>シリーズ<span>${esc(state)}</span></summary>
+    <div class="series-edit">
+      ${names.length ? `<div class="chips wrap">${names.map((n) => { const on = n === current && b.seriesName !== NO_SERIES; return `<button type="button" class="chip small ${on ? 'on' : ''}" data-act="series-name" data-v="${esc(n)}" aria-pressed="${on}">${esc(n)}</button>`; }).join('')}</div>` : ''}
+      <div class="series-new"><input id="f-series" maxlength="60" autocomplete="off" placeholder="シリーズ名を入れてまとめる" aria-label="シリーズ名"><button type="button" class="ghost small" data-act="series-name-save">まとめる</button></div>
+      ${reset ? `<div class="series-reset">${reset}</div>` : ''}
+      <p class="muted small">同じ著者の本を、同じシリーズ名でまとめます（本棚の「シリーズ」）。</p>
+    </div></details>`;
+}
+function setSeriesName(id, name) {
+  if (!store.get(id)) return;
+  store.update(id, { seriesName: name });
+  renderSheetBook(id);
+  toast(name === NO_SERIES ? 'シリーズにまとめないようにしました' : name ? `「${name}」にまとめました` : '自動でまとめるように戻しました');
 }
 
 // 本棚の本のあらすじ（本の情報と同じく NDL・openBD。24 時間この端末に保存）
@@ -702,7 +806,7 @@ function addFromWork(w, extra = {}) {
   const sameAuthor = store.books().filter((b) => normName(b.author) === normName(w.authorLabel.split('、')[0]));
   const genres = extra.genres || [...new Set(sameAuthor.flatMap((b) => b.genres || []))].slice(0, 2);
   const b = store.add({
-    title: w.main + (w.volume ? ` ${w.volume}` : ''),
+    title: extra.title || w.main + (w.volume ? ` ${w.volume}` : ''),
     author: extra.author || w.authorLabel.split('、')[0] || '',
     status, priority: 2, genres,
     source: extra.source || 'search', note: extra.note || '',
@@ -1094,6 +1198,20 @@ function undatedList(items, month) {
       ${cover(it.title, it.isbn, 'xs', it.coverIsbns, it.author)}<span class="cal-line-main"><span class="cal-line-title">${esc(it.title)}</span><span class="cal-line-author">${esc(it.author)}</span></span></button></li>`).join('')}</ul></section>`;
 }
 
+// 日付のマス（月表示・週表示で同じ見た目）。本がある日は表紙と冊数、タップでその日の本
+function calCell(date, list, t, label) {
+  const cls = `cal-cell${date === t ? ' today' : ''}${list.length ? ' has' : ''}${dateOf(date).getDay() === 0 ? ' sun' : ''}`;
+  return list.length
+    ? `<div class="${cls}"><button type="button" class="cal-day" data-act="cal-day" data-date="${date}" aria-label="${esc(dayLabel(date))} ${list.length}冊"><span class="cal-num">${label}</span>${cover(list[0].title, list[0].isbn, 'xs', list[0].coverIsbns, list[0].author)}${list.length > 1 ? `<span class="cal-count">+${list.length - 1}</span>` : ''}</button></div>`
+    : `<div class="${cls}"><span class="cal-num">${label}</span></div>`;
+}
+const calHead = () => WEEKDAYS.map((w, i) => `<div class="cal-dow${i === 0 ? ' sun' : ''}" aria-hidden="true">${w}</div>`).join('');
+// 月・週の下に出す発売の一覧（日付の早い順）
+function calDayList(list, heading, emptyText) {
+  return list.length ? `<section class="cal-month-list"><h3>${heading}</h3><ul>${list.map((it) => `<li><span class="cal-date">${Number(it.date.slice(8))}日<small>${WEEKDAYS[dateOf(it.date).getDay()]}</small></span>${calendarBookLine(it)}</li>`).join('')}</ul></section>`
+    : `<p class="muted cal-empty">${emptyText}</p>`;
+}
+
 function drawCalendar() {
   const box = $('#works-body');
   if (!box) return;
@@ -1116,32 +1234,24 @@ function drawCalendar() {
     for (let i = 0; i < first.getDay(); i++) cells.push('<div class="cal-cell blank" aria-hidden="true"></div>');
     for (let d = 1; d <= days; d++) {
       const date = `${ym}-${String(d).padStart(2, '0')}`;
-      const list = byDate.get(date) || [];
-      const cls = `cal-cell${date === t ? ' today' : ''}${list.length ? ' has' : ''}${new Date(y, m - 1, d).getDay() === 0 ? ' sun' : ''}`;
-      cells.push(list.length
-        ? `<div class="${cls}"><button type="button" class="cal-day" data-act="cal-day" data-date="${date}" aria-label="${esc(dayLabel(date))} ${list.length}冊"><span class="cal-num">${d}</span>${cover(list[0].title, list[0].isbn, 'xs', list[0].coverIsbns, list[0].author)}${list.length > 1 ? `<span class="cal-count">+${list.length - 1}</span>` : ''}</button></div>`
-        : `<div class="${cls}"><span class="cal-num">${d}</span></div>`);
+      cells.push(calCell(date, byDate.get(date) || [], t, d));
     }
     const monthItems = items.filter((it) => it.date && it.date.startsWith(ym)).sort((a, b) => a.date.localeCompare(b.date));
     body = `<div class="cal-nav"><button type="button" class="icon-btn" data-act="cal-move" data-v="-1" aria-label="前の月">‹</button><h2>${y}年${m}月</h2><button type="button" class="icon-btn" data-act="cal-move" data-v="1" aria-label="次の月">›</button></div>
-      <div class="cal-grid" role="grid" aria-label="${y}年${m}月の発売日">${WEEKDAYS.map((w, i) => `<div class="cal-dow${i === 0 ? ' sun' : ''}" aria-hidden="true">${w}</div>`).join('')}${cells.join('')}</div>
-      ${monthItems.length ? `<section class="cal-month-list"><h3>この月の発売</h3><ul>${monthItems.map((it) => `<li><span class="cal-date">${Number(it.date.slice(8))}日<small>${WEEKDAYS[dateOf(it.date).getDay()]}</small></span>${calendarBookLine(it)}</li>`).join('')}</ul></section>`
-      : `<p class="muted cal-empty">この月に発売日が分かっている本はありません。</p>`}
+      <div class="cal-grid" role="grid" aria-label="${y}年${m}月の発売日">${calHead()}${cells.join('')}</div>
+      ${calDayList(monthItems, 'この月の発売', 'この月に発売日が分かっている本はありません。')}
       ${undatedList(items, ym)}`;
   } else {
+    // 1 週間を月表示と同じマスで横一列に。月をまたぐ週は 1 日に「11/1」のように月も添える
     const start = /^\d{4}-\d{2}-\d{2}$/.test(ui.calWeek || '') ? weekStart(ui.calWeek) : weekStart(t);
     const dates = Array.from({ length: 7 }, (_, i) => { const d = dateOf(start); d.setDate(d.getDate() + i); return ymdOf(d); });
     const months = [...new Set(dates.map((d) => d.slice(0, 7)))];
-    const range = `${dateOf(dates[0]).getMonth() + 1}月${dateOf(dates[0]).getDate()}日〜${dateOf(dates[6]).getMonth() + 1}月${dateOf(dates[6]).getDate()}日`;
-    body = `<div class="cal-nav"><button type="button" class="icon-btn" data-act="cal-move" data-v="-1" aria-label="前の週">‹</button><h2>${range}</h2><button type="button" class="icon-btn" data-act="cal-move" data-v="1" aria-label="次の週">›</button></div>
-      <ol class="cal-week">${dates.map((date) => {
-        const list = byDate.get(date) || [];
-        const d = dateOf(date);
-        return `<li class="cal-week-day${date === t ? ' today' : ''}${d.getDay() === 0 ? ' sun' : ''}">
-          <div class="cal-week-date"><b>${d.getDate()}</b><span>${WEEKDAYS[d.getDay()]}</span></div>
-          <div class="cal-week-books">${list.length ? list.map(calendarBookLine).join('') : '<span class="cal-none">—</span>'}</div>
-        </li>`;
-      }).join('')}</ol>
+    const md = (s) => { const d = dateOf(s); return `${d.getMonth() + 1}月${d.getDate()}日`; };
+    const label = (s) => { const d = dateOf(s); return d.getDate() === 1 && months.length > 1 ? `${d.getMonth() + 1}/1` : d.getDate(); };
+    const weekItems = items.filter((it) => it.date && it.date >= dates[0] && it.date <= dates[6]).sort((a, b) => a.date.localeCompare(b.date));
+    body = `<div class="cal-nav"><button type="button" class="icon-btn" data-act="cal-move" data-v="-1" aria-label="前の週">‹</button><h2>${md(dates[0])}〜${md(dates[6])}</h2><button type="button" class="icon-btn" data-act="cal-move" data-v="1" aria-label="次の週">›</button></div>
+      <div class="cal-grid week" role="grid" aria-label="${esc(`${md(dates[0])}から${md(dates[6])}の発売日`)}">${calHead()}${dates.map((date) => calCell(date, byDate.get(date) || [], t, label(date))).join('')}</div>
+      ${calDayList(weekItems, 'この週の発売', 'この週に発売日が分かっている本はありません。')}
       ${months.map((mo) => undatedList(items, mo)).join('')}`;
   }
   box.innerHTML = `${switcher}${body}
@@ -1747,29 +1857,39 @@ const actions = {
   'versions': renderVersionHistory,
   'work-detail': el=>previewWork(workCache.get(el.dataset.key)),
   'series-vol': (el) => {
-    const v=findSeriesVol(el.dataset.key,el.dataset.vol);
+    const key=el.dataset.key,vol=Number(el.dataset.vol);
+    const d=findSeries(key);
+    const v=d?.vols.find(x=>x.vol===vol);
     if(!v || (v.upcoming && !v.book))return;
-    const y=window.scrollY,vol=Number(el.dataset.vol),key=el.dataset.key;
+    const y=window.scrollY;
     let b=v.book;
-    if(!b && v.work){
-      const author=shelfSeries(store.books()).find(s=>s.key===key)?.author;
-      b=addFromWork(v.work,{source:'series',publishedAt:v.publishedAt,author,status:'done'});
-    } else if(b) {
-      if(b.status==='done')store.update(b.id,{status:['want','reading','tsundoku'].includes(b.seriesPreviousStatus) ? b.seriesPreviousStatus : 'want',finishedAt:'',seriesPreviousStatus:''});
-      else store.update(b.id,{seriesPreviousStatus:b.status,status:'done'});
-    }
+    if(!b) b=addSeriesVolume(d,v,'done');
+    else if(b.status==='done')store.update(b.id,{status:['want','reading'].includes(b.seriesPreviousStatus) ? b.seriesPreviousStatus : 'want',finishedAt:'',seriesPreviousStatus:''});
+    else store.update(b.id,{seriesPreviousStatus:b.status,status:'done'});
     if(!b)return;
     window.scrollTo(0,y);
     const btn=[...document.querySelectorAll('[data-act="series-vol"]')].find(e=>e.dataset.key===key && Number(e.dataset.vol)===vol);
     btn?.focus({preventScroll:true});
-    toast(store.get(b.id)?.status==='done' ? `${vol}巻を読了にしました` : `${vol}巻の読了を取り消しました`);
+    const name=volName(d,v);
+    toast(store.get(b.id)?.status==='done' ? `${name}を読了にしました` : `${name}の読了を取り消しました`);
   },
   'series-add': (el) => {
-    const v = findSeriesVol(el.dataset.key, el.dataset.vol);
-    if (!v?.work || v.book) return;
-    // 著者名は本棚の表記にそろえる（同じシリーズとしてまとまるように）
-    const author = shelfSeries(store.books()).find((s) => s.key === el.dataset.key)?.author;
-    addFromWork(v.work, { source: 'series', publishedAt: v.publishedAt, author });
+    const d = findSeries(el.dataset.key);
+    const v = d?.vols.find((x) => x.vol === Number(el.dataset.vol));
+    if (!v || v.book) return;
+    addSeriesVolume(d, v); // 著者名は本棚の表記にそろえる（同じシリーズとしてまとまるように）
+  },
+  'series-name': (el) => setSeriesName(openId, el.dataset.v || ''),
+  'series-name-save': () => {
+    const name = ($('#f-series')?.value || '').normalize('NFC').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!name || name === NO_SERIES) { toast('シリーズ名を入れてください'); $('#f-series')?.focus(); return; }
+    setSeriesName(openId, name);
+  },
+  'series-more': (el) => {
+    const key = el.dataset.key;
+    expandedSeries.has(key) ? expandedSeries.delete(key) : expandedSeries.add(key);
+    drawSeries();
+    [...document.querySelectorAll('[data-act="series-more"]')].find((e) => e.dataset.key === key)?.focus({ preventScroll: true });
   },
   'release-detail': el=>previewRelease(store.releases().find(r=>r.key===el.dataset.key)),
   'preview-add': ()=>{
@@ -1868,9 +1988,9 @@ const actions = {
     if (route.name === 'author' && lastAuthor?.name === route.arg) drawAuthorResult(lastAuthor.name, lastAuthor.works);
   },
   'pick-random': () => {
-    const pool = store.books().filter((b) => b.status === 'want' || b.status === 'tsundoku');
-    if (!pool.length) { toast('読みたい本・積読がありません'); return; }
-    const weighted = pool.flatMap((b) => Array(b.status === 'tsundoku' ? 4 : b.priority || 1).fill(b));
+    const pool = store.books().filter((b) => b.status === 'want');
+    if (!pool.length) { toast('読みたい本がありません'); return; }
+    const weighted = pool.flatMap((b) => Array(b.priority || 1).fill(b));
     renderSheetBook(weighted[Math.floor(Math.random() * weighted.length)].id);
   },
   export: () => exportBackup(),
@@ -1972,6 +2092,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     e.target.click();
   }
+  if (e.key === 'Enter' && e.target.id === 'f-series' && !e.isComposing) { e.preventDefault(); actions['series-name-save'](); }
 });
 
 let typing;

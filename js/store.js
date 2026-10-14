@@ -160,7 +160,7 @@ export function prepareBackup(data) {
   const optionalStrings=(obj,keys)=>keys.every(k=>obj[k]==null || typeof obj[k]==='string');
   const optionalNumbers=(obj,keys)=>keys.every(k=>obj[k]==null || (typeof obj[k]==='number' && Number.isFinite(obj[k])));
   const stringArray=(obj,key)=>obj[key]==null || (Array.isArray(obj[key]) && obj[key].every(x=>typeof x==='string'));
-  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading','seriesPreviousStatus'];
+  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading','seriesPreviousStatus','seriesName'];
   // 同期用の印：{ キー: 時刻の文字列 }
   const stampMap=(v)=>v==null || (typeof v==='object' && !Array.isArray(v) && Object.values(v).every(x=>typeof x==='string'));
   if (!stampMap(data.removed) || !stampMap(data.unfollowed)) invalid();
@@ -176,6 +176,12 @@ export function prepareBackup(data) {
   if (data.onboardingDone!=null && typeof data.onboardingDone!=='boolean') invalid();
   if (!stringArray(data,'favoriteGenres') || !optionalStrings(data,['preferencesAt'])) invalid();
   const next = { ...structuredClone(EMPTY), ...structuredClone(data) };
+  // 積読は v0.13 で廃止。以前の保存・バックアップ・古い版の端末からの同期の積読は「読みたい」に読み替える。
+  // 読み替えだけでは変更時刻（modifiedAt）を進めない（ほかの端末の新しい変更を上書きしないため）
+  for (const b of next.books) {
+    if (b.status === 'tsundoku') b.status = 'want';
+    if (b.seriesPreviousStatus === 'tsundoku') b.seriesPreviousStatus = 'want';
+  }
   // 以前の本棚・空に整理した既存端末も、新しい人向けの初期画面で遮らない。
   if (!Object.hasOwn(data,'onboardingDone') || next.books.length) next.onboardingDone=true;
   // v0.2.0 の空配列は「本を指定せずに読んだ日」の印。

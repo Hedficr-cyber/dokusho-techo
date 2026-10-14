@@ -534,15 +534,14 @@ body.typing .tabbar { opacity:0; visibility:hidden; pointer-events:none; transfo
 .cal-line-title { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cal-line-author { font-size:12px; color:var(--ink-2); }
 .cal-empty { margin-top:18px; }
-.cal-week { list-style:none; margin:0; padding:0; }
-.cal-week-day { display:flex; gap:14px; padding:10px 0; border-bottom:1px solid var(--line); min-height:64px; }
-.cal-week-date { width:42px; flex-shrink:0; text-align:center; padding-top:4px; }
-.cal-week-date b { display:block; font-size:20px; line-height:1.1; }
-.cal-week-date span { font-size:11px; color:var(--ink-2); }
-.cal-week-day.sun .cal-week-date { color:#b0333c; }
-.cal-week-day.today .cal-week-date b { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:50%; background:var(--ink); color:var(--paper); font-size:17px; }
-.cal-week-books { flex:1; min-width:0; display:flex; flex-direction:column; }
-.cal-none { color:var(--ink-2); padding-top:8px; }
+/* 週表示：月表示と同じマスを横一列に。1 週間分なので縦に大きく、表紙も大きめ */
+.cal-grid.week .cal-cell { min-height:124px; padding:8px 2px 6px; }
+.cal-grid.week .cal-day { min-height:110px; gap:8px; }
+.cal-grid.week .cal-num { font-size:15px; }
+.cal-grid.week .cal-cell.today .cal-num { width:28px; height:28px; font-size:14px; }
+.cal-grid.week .cal-day .cover.xs { width:min(46px,calc(100% - 6px)); height:auto; aspect-ratio:30/44; }
+.cal-grid.week .cal-count { right:4px; bottom:4px; }
+@media(min-width:900px) { .cal-grid.week .cal-cell { min-height:150px; } .cal-grid.week .cal-day { min-height:136px; } .cal-grid.week .cal-day .cover.xs { width:64px; } }
 .day-books { list-style:none; margin:0; padding:0; display:grid; gap:22px; }
 .day-book { display:flex; gap:16px; align-items:flex-start; }
 .day-book-main { flex:1; min-width:0; }
@@ -550,7 +549,7 @@ body.typing .tabbar { opacity:0; visibility:hidden; pointer-events:none; transfo
 .day-book-main .book-author { margin:4px 0 6px; }
 .day-synopsis { font-size:13px; line-height:1.85; color:var(--ink); margin:8px 0 10px; }
 .day-book .row { gap:8px; flex-wrap:wrap; }
-@media(prefers-color-scheme:dark) { .cal-switch { background:rgba(48,48,54,.7); border-color:#ffffff12; } .cal-switch button.on { background:#505057; } .cal-dow.sun, .cal-cell.sun .cal-num, .cal-week-day.sun .cal-week-date { color:#ff9aa2; } }
+@media(prefers-color-scheme:dark) { .cal-switch { background:rgba(48,48,54,.7); border-color:#ffffff12; } .cal-switch button.on { background:#505057; } .cal-dow.sun, .cal-cell.sun .cal-num { color:#ff9aa2; } }
 .cover.xs .spine { padding:2px; border-left-width:2px; }
 /* 記録：PC と iPhone の同期 */
 .sync-card { margin:28px 0 8px; padding:20px; border:1px solid var(--line); border-radius:20px; background:var(--surface); }
@@ -616,6 +615,22 @@ button.vol-done { background:var(--ink); border-color:var(--ink); color:var(--pa
 button.vol-done .vol-unit { color:inherit; opacity:.8; }
 button.vol-missing { background:transparent; border-style:dashed; }
 button.vol-coming { background:var(--accent-soft); border-style:solid; }
+/* 名前のあるシリーズ（館シリーズなど）：巻を「番号＋書名」のラベルで */
+button.vol.vol-named { max-width:100%; justify-content:flex-start; gap:8px; padding:0 14px 0 12px; }
+button.vol.vol-named .vol-number { font-size:12px; color:var(--ink-2); font-weight:600; }
+button.vol-done.vol-named .vol-number { color:inherit; opacity:.7; }
+.vol-name { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:14em; }
+button.vol-missing .vol-name { font-weight:500; }
+button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); background:transparent; }
+.series-checking { margin:14px 2px 0; }
+/* 本の詳細：シリーズ */
+.series-select { border-bottom:1px solid var(--line); padding:4px 0; }
+.series-select summary { display:flex; align-items:center; justify-content:space-between; gap:14px; min-height:48px; cursor:pointer; font-size:13px; }
+.series-select summary span { color:var(--ink-2); font-size:12px; text-align:right; max-width:65%; }
+.series-edit { display:grid; gap:12px; padding:8px 0 16px; }
+.series-new { display:flex; gap:8px; align-items:center; }
+.series-new input { flex:1; min-width:0; }
+.series-reset { display:flex; flex-wrap:wrap; gap:4px 18px; }
 .search-scan { width:100%; justify-content:center; margin:0 0 14px; min-height:56px; padding:12px 16px; border-radius:15px; background:transparent; border:1px solid var(--ink); font-weight:600; box-shadow:none; }
 .sync-panel .sync-card { margin:18px 0 0; border:0; padding:0; background:transparent; box-shadow:none; }
 .onboarding { max-width:560px; margin:16px auto; }

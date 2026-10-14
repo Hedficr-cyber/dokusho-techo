@@ -9,6 +9,7 @@ const EMPTY = {
   follows: [],      // フォロー中の作家 { name, addedAt, lastChecked }
   releases: [],     // 見つかった新刊・近刊 { key, title, author, month, publisher, isbn, link, ndc, foundAt, confirmedAt, seen }
   releaseGone: {},  // 同期用：確かめ直して見つからなくなった新刊 { key: 外した時刻 }（ほかの端末から戻さない）
+  readDatesFilled: false, // 読了日のない読了の本に、だいたいの日付を振った（端末ごとに 1 回）
   dismissed: [],    // 「表示しない」にした新刊の key
   hiddenRecs: [],   // 検索タブのおすすめで「表示しない」にした作品の key
   manualReadDays: [], // 本棚の「今日読んだ」で記録した日。本ごとの記録を取り消しても残す
@@ -129,6 +130,57 @@ export function remove(id) {
   state.removed[id] = new Date().toISOString(); // 消した印（同期で、ほかの端末からも消す）
   state.books.splice(i, 1);
   save();
+}
+
+// 読了日のない読了の本（写真から取り込んだ本など）に、だいたいの読了日を振る（v0.15.1 本人：結構前に読んだ本なので適当に）。
+// 刊行から 1〜18 か月ほど後で、2015 年 4 月〜2025 年末（最近の本は刊行の 2 週間後から今日まで）。同じ著者の本は刊行の順に読んだことにする。
+// 日付は本の id から決めるので、PC と iPhone で別々に振っても同じ日になる（同期でずれない）。
+// 端末ごとに 1 回だけ（あとで本人が日付を消した本は振り直さない）
+function guessReadDate(b) {
+  let h = 2166136261;
+  for (const c of String(b.id)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  const day = 86400000;
+  const end = Math.min(Date.parse('2025-12-31'), Date.now() - 60 * day);
+  const floor = Date.parse('2015-04-01'); // 古い版（1990 年の文庫など）でも、本人が読めた頃より前にしない
+  const raw = /^\d{4}-\d{2}(-\d{2})?$/.test(b.publishedAt || '') ? b.publishedAt : /^\d{4}$/.test(String(b.year || '')) ? `${b.year}-06` : '';
+  const pub = raw ? Date.parse(raw.length === 7 ? `${raw}-01` : raw) : NaN;
+  let t;
+  if (Number.isFinite(pub)) {
+    t = pub + (30 + (h % 510)) * day;
+    if (t > end) t = pub + 14 * day > end ? Math.min(Date.now() - day, pub + (14 + (h % 30)) * day) : end - (h % 90) * day;
+    if (t < floor) t = floor + (h % 1500) * day;
+  } else {
+    const from = floor;
+    t = from + (h % Math.max(1, Math.floor((end - from) / day))) * day;
+  }
+  return new Date(t).toISOString().slice(0, 10);
+}
+// 同じ著者の本は、刊行の古い本ほど先に読んだことにする（シリーズの 2 巻を 1 巻より前にしない）
+const pubKey = (b) => b.publishedAt || (b.year ? `${b.year}-06` : '9999');
+function assignReadDates(list) {
+  const byAuthor = new Map();
+  for (const b of list) byAuthor.set(normName(b.author), [...(byAuthor.get(normName(b.author)) || []), b]);
+  for (const books of byAuthor.values()) {
+    // 刊行順に並べ、それぞれ自分の刊行より後で、ひとつ前の本より前にならない日に（同じ日はあり）
+    let prev = '';
+    for (const b of books.sort((x, y) => pubKey(x).localeCompare(pubKey(y)) || String(x.id).localeCompare(String(y.id)))) {
+      const d = guessReadDate(b);
+      if (pubKey(b) === '9999') { b.finishedAt = d; continue; } // 刊行がわからない本は順番に入れない
+      b.finishedAt = d < prev ? prev : d;
+      prev = b.finishedAt;
+    }
+  }
+}
+export function fillMissingReadDates() {
+  refreshStoredState();
+  if (state.readDatesFilled) return 0;
+  const todo = state.books.filter((b) => b.status === 'done' && !b.finishedAt);
+  const stamp = new Date().toISOString();
+  assignReadDates(todo);
+  for (const b of todo) Object.assign(b, { updatedAt: today(), modifiedAt: stamp });
+  state.readDatesFilled = true;
+  save();
+  return todo.length;
 }
 
 // 「元に戻す」：消した本を同じ位置に戻し、消した印も外す
@@ -260,6 +312,7 @@ export function mergeBooks(data) {
   const stamp = new Date().toISOString();
   const added = [];
   for (const p of plan) {
+    // 読了日のない読了の本（以前に読んだ本の一覧など）には、だいたいの読了日を振る
     if (p.type === 'read') Object.assign(p.local, { status: 'done', finishedAt: p.inc.finishedAt || p.local.finishedAt || '', updatedAt: today(), modifiedAt: stamp });
     if (p.type !== 'add') continue;
     const b = { ...p.inc, updatedAt: today(), modifiedAt: stamp };
@@ -268,6 +321,7 @@ export function mergeBooks(data) {
     added.push(b);
   }
   state.books.unshift(...added); // ファイルの順のまま、本棚の先頭に
+  assignReadDates([...added, ...plan.filter((p) => p.type === 'read').map((p) => p.local)].filter((b) => b.status === 'done' && !b.finishedAt));
   const result = { added: added.length, addedDone: added.filter((b) => b.status === 'done').length, read: plan.filter((p) => p.type === 'read').length };
   if (result.added || result.read) save();
   return result;

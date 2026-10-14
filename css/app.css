@@ -756,8 +756,10 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 body { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 input, textarea, [contenteditable="true"] { -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
 img { -webkit-user-drag:none; -webkit-touch-callout:none; }
-/* ⑩ 指で触れたときに黒い枠を出さない（枠はキーボードで操作するときだけ） */
-@media (hover:none) { button:focus-visible, a:focus-visible, summary:focus-visible, [role=button]:focus-visible { outline:none; } }
+/* ⑩ 指で触れたときに黒い枠を出さない（枠はキーボードで操作するときだけ）。
+   v0.15.1：本棚の本の行（.book[role=button]:focus-visible）などの方が指定が強く効いていなかったので、タッチの端末ではすべて消す。
+   詳細を閉じたときに元の行へ戻る focus でも出さない */
+@media (hover:none), (pointer:coarse) { :focus, :focus-visible, :focus-within { outline:none !important; } }
 [role=button] { -webkit-tap-highlight-color:transparent; }
 /* ⑨ 閉じるボタンは × だけ（丸い縁と背景をなくす） */
 .sheet-close { border:0; background:transparent; box-shadow:none; color:var(--ink); }

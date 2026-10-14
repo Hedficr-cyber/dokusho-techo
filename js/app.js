@@ -2499,6 +2499,7 @@ sheet.addEventListener('close', () => {
 store.load();
 window.addEventListener('hashchange', onHash);
 onHash();
+store.fillMissingReadDates(); // v0.15.1：写真から取り込んだ読了の本などに、だいたいの読了日を振る（端末ごとに 1 回。同期でもう一方へ）
 store.syncShelfFollows(authorCounts().map(([a])=>a));
 updateBadge();
 runSync();

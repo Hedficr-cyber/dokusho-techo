@@ -2524,6 +2524,35 @@ sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); }
 // 本の詳細の表紙に触れると、その位置から画面の中央へ大きく広がる（v0.15.3 本人：表紙がブワンと大きくなって見やすく）。
 // どこかに触れるか Esc で元の位置へ戻る。表紙の画像がない本（書名を組んだ表紙）は広げない
 let coverZoom = null;
+// 拡大用の大きい表紙（同じ配信元の同じ本）。版元ドットコムは幅 600px の版、Google は高さ 1200px で頼む
+// （v0.15.5 本人：広げた表紙の画質が荒すぎる。Google の表紙は幅 128px のままだった）
+function hiResCover(img) {
+  const isbn = /^\d{13}$/.test(img.dataset.isbn || '') ? img.dataset.isbn : '';
+  if (img.dataset.step === '0' && isbn) return `https://img.hanmoto.com/bd/img/${isbn}_600.jpg`;
+  if (img.dataset.step === '1' && isbn) return `https://books.google.com/books/content?vid=ISBN${isbn}&printsec=frontcover&img=1&zoom=1&fife=h1200`;
+  if (/^[\w-]+$/.test(img.dataset.googleId || '')) return `https://books.google.com/books/content?id=${img.dataset.googleId}&printsec=frontcover&img=1&zoom=1&fife=h1200`;
+  return '';
+}
+// 大きい表紙を読んでおく（詳細を開いて表紙が出たとき・表紙に触れたとき）。元より大きく、縦横の比が同じ（別の画像でない）ときだけ使う
+const hiResMemo = new Map();
+function loadHiRes(img) {
+  const url = hiResCover(img);
+  if (!url || !img.naturalWidth) return Promise.resolve(null);
+  if (!hiResMemo.has(url)) {
+    const ratio = img.naturalHeight / img.naturalWidth;
+    const hi = new Image();
+    hi.src = url;
+    hiResMemo.set(url, hi.decode().then(() => {
+      const r = hi.naturalHeight / hi.naturalWidth;
+      return hi.naturalWidth > img.naturalWidth && Math.abs(r - ratio) / ratio < 0.08 ? hi : null;
+    }).catch(() => null));
+  }
+  return hiResMemo.get(url);
+}
+document.addEventListener('load', (e) => {
+  const img = e.target;
+  if (img instanceof HTMLImageElement && img.classList.contains('ok') && img.closest('#sheet .detail-head')) loadHiRes(img);
+}, true);
 function zoomCover(img) {
   if (coverZoom || !img.naturalWidth) return;
   let box = $('#cover-zoom');
@@ -2541,14 +2570,8 @@ function zoomCover(img) {
   const to = { left: (innerWidth - w) / 2, top: (innerHeight - w * ratio) / 2, width: w, height: w * ratio };
   Object.assign(big.style, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px` });
   big.src = img.currentSrc || img.src;
-  // 版元ドットコムの表紙は、幅 600px の版を裏で読み、届いたら差し替える（小さい表紙を引き伸ばしたぼやけを減らす）
-  if (img.dataset.step === '0' && /^\d{13}$/.test(img.dataset.isbn || '')) {
-    const hi = new Image();
-    hi.src = `https://img.hanmoto.com/bd/img/${img.dataset.isbn}_600.jpg`;
-    hi.decode().then(() => {
-      if (coverZoom?.big === big && !coverZoom.closing && hi.naturalWidth > img.naturalWidth && hi.naturalHeight > hi.naturalWidth * 1.05) big.src = hi.src;
-    }).catch(() => {});
-  }
+  // 大きい表紙が届いていればすぐ、まだなら届いた時点で差し替える（小さい表紙を引き伸ばした荒さをなくす）
+  loadHiRes(img).then((hi) => { if (hi && coverZoom?.big === big && !coverZoom.closing) big.src = hi.src; });
   const from = img.getBoundingClientRect();
   const holder = img.closest('.cover') || img; // 広げている間は元の表紙の場所を空ける（下の書名の表紙も見せない）
   coverZoom = { img, holder, box, big, to };
@@ -2583,6 +2606,10 @@ function unzoomCover() {
 sheet.addEventListener('click', (e) => {
   const img = e.target.closest?.('.detail-head > .cover')?.querySelector('img.ok');
   if (img) zoomCover(img);
+});
+sheet.addEventListener('pointerdown', (e) => {
+  const img = e.target.closest?.('.detail-head > .cover')?.querySelector('img.ok');
+  if (img) loadHiRes(img);
 });
 sheet.addEventListener('close', () => {
   if (coverZoom) unzoomCover();

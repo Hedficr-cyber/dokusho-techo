@@ -160,7 +160,7 @@ export function prepareBackup(data) {
   const optionalStrings=(obj,keys)=>keys.every(k=>obj[k]==null || typeof obj[k]==='string');
   const optionalNumbers=(obj,keys)=>keys.every(k=>obj[k]==null || (typeof obj[k]==='number' && Number.isFinite(obj[k])));
   const stringArray=(obj,key)=>obj[key]==null || (Array.isArray(obj[key]) && obj[key].every(x=>typeof x==='string'));
-  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading'];
+  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading','seriesPreviousStatus'];
   // 同期用の印：{ キー: 時刻の文字列 }
   const stampMap=(v)=>v==null || (typeof v==='object' && !Array.isArray(v) && Object.values(v).every(x=>typeof x==='string'));
   if (!stampMap(data.removed) || !stampMap(data.unfollowed)) invalid();
@@ -180,6 +180,15 @@ export function prepareBackup(data) {
   if (!Object.hasOwn(data,'onboardingDone') || next.books.length) next.onboardingDone=true;
   // v0.2.0 の空配列は「本を指定せずに読んだ日」の印。
   if (!('manualReadDays' in data)) next.manualReadDays = Object.keys(next.readLog).filter((d) => !next.readLog[d].length);
+  // 古いタブの保存で本の配列だけ戻っても、保存済みの削除印を優先する。
+  // 「元に戻す」は削除より新しい modifiedAt を持つので維持する（同期と同じ判定）。
+  next.removed ||= {};
+  next.unfollowed ||= {};
+  const gone=new Set(next.deletedSeedIds);
+  const stamp=b=>b.modifiedAt || (b.updatedAt ? `${b.updatedAt}T00:00:00.000Z` : '') || (b.addedAt ? `${b.addedAt}T00:00:00.000Z` : '');
+  next.books=next.books.filter(b=>next.removed[b.id] ? stamp(b)>next.removed[b.id] : !gone.has(b.id));
+  const present=new Set(next.books.map(b=>b.id));
+  next.deletedSeedIds=[...gone].filter(id=>!present.has(id));
   return next;
 }
 

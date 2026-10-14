@@ -403,7 +403,7 @@ function seriesCard(d) {
     : cover(lead.title, lead.isbn, 's', lead.coverIsbns || [], d.author);
   const chips = d.vols.map((v) => {
     const st = volState(v);
-    return `<li><button type="button" class="vol vol-${st}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${v.vol}巻：${VOL_STATE[st]}"><span class="vol-number">${v.vol}</span><span class="vol-unit">巻</span></button></li>`;
+    return `<li><button type="button" class="vol vol-${st}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${v.vol}巻：${VOL_STATE[st]}${st==='done' ? '、タップで読了を取り消す' : v.upcoming && !v.book ? '' : '、タップで読了'}" aria-pressed="${st==='done'}" ${v.upcoming && !v.book ? 'disabled' : ''}><span class="vol-number">${v.vol}</span><span class="vol-unit">巻</span></button></li>`;
   }).join('');
   const n = d.next;
   let next = '';
@@ -1358,7 +1358,7 @@ const manualAdd = (q = '') => `<details class="manual-add">
 function renderSearch() {
   view.innerHTML=`<section class="search-page">
     ${pageHead('検索','')}
-    <button type="button" class="scan-btn search-scan" data-act="open-scan">${SCAN_ICON}<span>バーコードで読み取る</span>${icon('arrow')}</button>
+    <button type="button" class="scan-btn search-scan" data-act="open-scan">${SCAN_ICON}<span>バーコードで読み取る</span></button>
     <form id="book-search-form" class="search-bar book-search" role="search" autocomplete="off">
       <label class="search-wrap">${icon('search')}<span class="sr-only">書名・著者・ISBN</span><input id="book-q" type="search" placeholder="書名・著者・ISBN" value="${esc(ui.searchQ)}" enterkeyhint="search"></label>
       <button type="submit" class="primary">検索</button>
@@ -1481,11 +1481,10 @@ function renderStats() {
     <div class="history-intro"><p>読み終えた本と、その日の記録。</p>${years.length ? `<div class="shelf-genres history-years" role="group" aria-label="記録する年">${[['all', 'すべて'], ...years.map((y) => [y, `${y}年`])].map(([v, l]) => `<button type="button" class="genre-filter ${ui.historyYear === v ? 'on' : ''}" data-act="history-year" data-v="${esc(v)}" aria-pressed="${ui.historyYear === v}">${esc(l)}</button>`).join('')}</div>` : ''}</div>
     ${rows ? `<ul class="books history-list">${rows}</ul>` : '<div class="empty"><span class="empty-icon">'+icon('book')+'</span><h2>まだ読了の記録がありません</h2><p>本の詳細で「読了」を選ぶと、<br>読み終えた日と一緒にここへ並びます。</p><a href="#shelf" class="primary">本棚を開く</a></div>'}
     <details id="sync-panel" class="backup-panel sync-panel"><summary><span>同期設定</span><span id="sync-label" class="muted">${sync.status().on ? 'オン' : '未設定'}</span></summary><section id="sync-card" class="sync-card">${syncCard()}</section></details>
-    <button type="button" class="settings-row" data-act="preferences"><span>好みのジャンル</span>${icon('arrow')}</button>
     <details class="backup-panel"><summary><span>データのバックアップ</span><span class="muted">${all.length}冊</span></summary>
       <p>本棚はこのブラウザに保存されています。別のブラウザやURLへは、バックアップを書き出して移せます。</p>
       <div class="row"><button type="button" class="primary" data-act="export">バックアップを書き出す</button><label class="ghost file-btn">バックアップから戻す<input id="import-file" type="file" accept="application/json,.json"></label></div>
-      <p class="muted small">更新 ${esc(localTime(store.snapshot().updatedAt))}</p>
+      <p class="muted small">更新 ${esc(localTime(store.snapshot().updatedAt))}</p><button type="button" class="link small" data-act="backup-preview">バックアップの内容を確認</button>
     </details><p class="app-footer">読書手帖 <span>${APP_VERSION}</span><button type="button" class="link" data-act="versions">バージョン履歴</button></p>
   </section>`;
 }
@@ -1507,6 +1506,14 @@ function exportBackup() {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   toast('バックアップを書き出しました');
+}
+
+function showBackupPreview() {
+  stopBookPreview();flushMemo();stopScanning();openId=null;
+  const data=store.snapshot();
+  const removed=[...new Set([...Object.keys(data.removed || {}),...(data.deletedSeedIds || [])])];
+  sheetBody.innerHTML=`<h2 class="sheet-title">本棚のバックアップ</h2><p>${data.books.length}冊 ・ 削除の記録 ${removed.length}冊</p><p class="muted small">このブラウザに保存された内容です。書き出したファイルを別のブラウザへ戻すと、本棚と削除の記録を引き継げます。</p><label class="field"><span class="label">バックアップの内容</span><textarea id="backup-preview" rows="10" readonly spellcheck="false">${esc(JSON.stringify(data,null,1))}</textarea></label><button type="button" class="primary" data-act="export">ファイルに書き出す</button>`;
+  showSheet();sheetBody.scrollTop=0;
 }
 
 async function importBackup(file) {
@@ -1733,15 +1740,29 @@ store.subscribe((ev) => {
 
 // ---------------------------------------------------------------- 操作
 const actions = {
+  'backup-preview':showBackupPreview,
   'preferences':openPreferences,
   'preference-toggle':el=>{const id=el.dataset.v;preferred.has(id)?preferred.delete(id):preferred.add(id);$('#preference-choices').innerHTML=genreChoices();$('#preference-choices [data-v="'+id+'"]')?.focus();},
   'preferences-save':()=>{store.setFavoriteGenres([...preferred]);recState=null;ui.searchQ='';ui.recShift=(ui.recShift || 0)+1;saveUi();if(editingPreferences){editingPreferences=false;closeSheet();}if(location.hash!=='#search')location.hash='#search';else render();},
   'versions': renderVersionHistory,
   'work-detail': el=>previewWork(workCache.get(el.dataset.key)),
   'series-vol': (el) => {
-    const v = findSeriesVol(el.dataset.key, el.dataset.vol);
-    if (v?.book) renderSheetBook(v.book.id);
-    else if (v?.work) previewWork(v.work);
+    const v=findSeriesVol(el.dataset.key,el.dataset.vol);
+    if(!v || (v.upcoming && !v.book))return;
+    const y=window.scrollY,vol=Number(el.dataset.vol),key=el.dataset.key;
+    let b=v.book;
+    if(!b && v.work){
+      const author=shelfSeries(store.books()).find(s=>s.key===key)?.author;
+      b=addFromWork(v.work,{source:'series',publishedAt:v.publishedAt,author,status:'done'});
+    } else if(b) {
+      if(b.status==='done')store.update(b.id,{status:['want','reading','tsundoku'].includes(b.seriesPreviousStatus) ? b.seriesPreviousStatus : 'want',finishedAt:'',seriesPreviousStatus:''});
+      else store.update(b.id,{seriesPreviousStatus:b.status,status:'done'});
+    }
+    if(!b)return;
+    window.scrollTo(0,y);
+    const btn=[...document.querySelectorAll('[data-act="series-vol"]')].find(e=>e.dataset.key===key && Number(e.dataset.vol)===vol);
+    btn?.focus({preventScroll:true});
+    toast(store.get(b.id)?.status==='done' ? `${vol}巻を読了にしました` : `${vol}巻の読了を取り消しました`);
   },
   'series-add': (el) => {
     const v = findSeriesVol(el.dataset.key, el.dataset.vol);

@@ -34,7 +34,7 @@ function mergeMarks(...sources) {
 
 export function mergeSyncData(local, remote) {
   const removed = mergeMarks(remote.removed, local.removed);
-  const deletedSeedIds = union(local.deletedSeedIds, remote.deletedSeedIds);
+  let deletedSeedIds = union(local.deletedSeedIds, remote.deletedSeedIds);
   const gone = new Set(deletedSeedIds);
   const byId = new Map();
   const order = [];
@@ -45,7 +45,11 @@ export function mergeSyncData(local, remote) {
     else { byId.set(b.id, b); order.push(b.id); }
   }
   const books = order.map((id) => byId.get(id))
-    .filter((b) => !gone.has(b.id) && (!removed[b.id] || stamp(b) > removed[b.id]));
+    // 初期リストの本も、削除より新しい「元に戻す」があれば残す。
+    // 時刻がない旧データの削除印は尊重し、古い端末から勝手に復活させない。
+    .filter((b) => removed[b.id] ? stamp(b) > removed[b.id] : !gone.has(b.id));
+  const present=new Set(books.map(b=>b.id));
+  deletedSeedIds=deletedSeedIds.filter(id=>!present.has(id));
   // 自分でフォローした著者：フォローした時刻とやめた時刻の新しい方
   const unfollowed = mergeMarks(remote.unfollowed, local.unfollowed);
   const follows = new Map();

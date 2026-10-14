@@ -568,3 +568,42 @@ body.typing .tabbar { opacity:0; visibility:hidden; pointer-events:none; transfo
 .sync-form input { font-size:16px; } /* iPhone で入力欄を拡大しない */
 .sync-choices { display:grid; gap:6px; margin-top:16px; }
 .sync-choices .muted { margin:0 0 10px; }
+/* 下から出る画面：スクロールは中身（.sheet-body）で行い、角の丸みを保つ。閉じるボタンは右上に固定。
+   スクロールバーは細く、つまみだけ（ブラウザ標準の太いバーと矢印を出さない） */
+.sheet[open] { display:flex; flex-direction:column; overflow:hidden; touch-action:auto; }
+.sheet-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y;
+  scrollbar-width:thin; scrollbar-color:color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
+.sheet-body::-webkit-scrollbar { width:6px; }
+.sheet-body::-webkit-scrollbar-track { background:transparent; margin:28px 0; }
+.sheet-body::-webkit-scrollbar-thumb { background:color-mix(in srgb, var(--ink) 22%, transparent); border-radius:3px; }
+.sheet-body::-webkit-scrollbar-button { display:none; }
+.sheet-close { position:absolute; top:12px; right:12px; margin:0; float:none; }
+/* 知らせの「元に戻す」 */
+.toast.has-action { display:flex; align-items:center; gap:14px; text-align:left; padding:8px 8px 8px 17px; }
+.toast[hidden] { display:none; }
+.toast-action { flex-shrink:0; min-height:40px; padding:0 14px; border:0; border-radius:8px; background:color-mix(in srgb, var(--paper) 18%, transparent); color:var(--paper); font-size:13px; font-weight:700; }
+/* 本の詳細のあらすじ（長いときは 6 行で畳む） */
+.book-synopsis { margin:-6px 0 26px; }
+.book-synopsis .label { display:block; margin-bottom:8px; }
+.book-synopsis .synopsis-text { font-size:14px; line-height:1.95; white-space:pre-line; overflow-wrap:anywhere; margin:0; }
+.book-synopsis .synopsis-text.clamp { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+.book-synopsis .more-synopsis { min-height:40px; margin-top:4px; }
+.book-synopsis .loading { margin:4px 0; font-size:13px; }
+/* 読み終えた日：アプリのカレンダー */
+.date-btn { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:48px; padding:10px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--ink); font-size:15px; font-weight:600; text-align:left; }
+.date-btn svg { width:20px; height:20px; flex-shrink:0; color:var(--ink-2); }
+.date-btn[aria-expanded=true] { border-color:var(--ink); }
+.date-pop { margin:-8px 0 22px; padding:14px 12px 10px; border:1px solid var(--line); border-radius:18px; background:var(--surface); box-shadow:0 8px 24px #24242712; }
+.date-pop[hidden] { display:none; }
+.dp-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.dp-head b { font-size:16px; }
+.dp-head .icon-btn { width:44px; height:44px; font-size:22px; border-radius:22px; }
+.dp-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:2px; }
+.dp-dow { text-align:center; font-size:11px; color:var(--ink-2); padding:4px 0; }
+.dp-dow.sun, .dp-day.sun { color:#b0333c; }
+.dp-day { aspect-ratio:1; min-height:40px; border:0; border-radius:50%; background:transparent; color:var(--ink); font-size:14px; font-weight:500; }
+.dp-day.today { box-shadow:inset 0 0 0 1.5px var(--ink-2); }
+.dp-day.on { background:var(--ink); color:var(--paper); font-weight:700; }
+@media(hover:hover) { .dp-day:not(.on):hover { background:var(--surface-2); } }
+.dp-foot { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+@media(prefers-color-scheme:dark) { .dp-dow.sun, .dp-day.sun { color:#ff9aa2; } .dp-day.on { color:var(--on-accent); background:var(--accent); } }

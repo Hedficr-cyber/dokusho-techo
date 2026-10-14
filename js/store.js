@@ -110,6 +110,18 @@ export function remove(id) {
   save();
 }
 
+// 「元に戻す」：消した本を同じ位置に戻し、消した印も外す
+export function restore(book, index = 0) {
+  if (!book?.id || get(book.id)) return;
+  const removedAt=Date.parse(state.removed[book.id] || '') || 0;
+  const restoredAt=new Date(Math.max(Date.now(),removedAt+1)).toISOString();
+  delete state.removed[book.id];
+  state.deletedSeedIds = state.deletedSeedIds.filter((x) => x !== book.id);
+  state.books.splice(Math.min(Math.max(index, 0), state.books.length), 0, { ...book, modifiedAt: restoredAt });
+  save();
+}
+export const indexOf = (id) => state.books.findIndex((b) => b.id === id);
+
 // 入力を検証してから置き換える。古いバックアップには新しい項目を補う。
 export function prepareBackup(data) {
   const invalid = () => { throw new Error('読書手帖のバックアップファイルではありません'); };

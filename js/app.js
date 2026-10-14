@@ -116,12 +116,21 @@ const COVER_SOURCES = [
 ];
 const coverUrl = (isbn, step = 0) => COVER_SOURCES[step](isbn);
 
+// 見つかった表紙をこの起動中は覚えておく（描き直すたびに「画像なし」→次の配信元と探し直して、表紙が一瞬消えるのを防ぐ）
+// key：候補の ISBN の並び → { src, isbn, step, candidate } か 'none'（どこにもない）
+const coverMemo = new Map();
+const rememberCover = (img, found) => { if (img.dataset.memo) coverMemo.set(img.dataset.memo, found ? { src: img.currentSrc || img.src, isbn: img.dataset.isbn || '', step: img.dataset.step, candidate: img.dataset.candidate || '0' } : 'none'); };
+
 // 旧版の候補を順に試す。ISBNは書誌と一致するものだけを使う。
 function cover(title,isbn,size='s',alternatives=[],author='') {
   const googleId=confirmedGoogleCover(title,author);
   const candidates=coverCandidates(isbn,alternatives);
   const spine=`<span class="spine" style="--cloth:${clothColor(title)}"><span class="spine-t">${esc(mainTitle(title))}</span></span>`;
-  const img=candidates.length ? `<img alt="" loading="lazy" decoding="async" data-isbn="${candidates[0]}" data-original="${coverIsbn(isbn)}" data-candidates="${candidates.join(',')}" data-candidate="0" data-step="0" src="${coverUrl(candidates[0],0)}">` : googleId ? `<img alt="" loading="lazy" decoding="async" data-google-id="${googleId}" data-step="1" src="https://books.google.com/books/content?id=${googleId}&amp;printsec=frontcover&amp;img=1&amp;zoom=1">` : '';
+  const memoKey=`${candidates.join(',')}|${googleId || ''}`;
+  const hit=coverMemo.get(memoKey);
+  if (hit==='none') return `<span class="cover ${size}" aria-hidden="true">${spine}</span>`;
+  if (hit) return `<span class="cover ${size}" aria-hidden="true">${spine}<img class="ok" alt="" decoding="sync" data-memo="${esc(memoKey)}" data-isbn="${esc(hit.isbn)}" data-original="${coverIsbn(isbn)}" data-candidates="${candidates.join(',')}" data-candidate="${esc(hit.candidate)}" data-step="${esc(hit.step)}"${googleId && !hit.isbn ? ` data-google-id="${googleId}"` : ''} src="${esc(hit.src)}"></span>`;
+  const img=candidates.length ? `<img alt="" loading="lazy" decoding="async" data-memo="${esc(memoKey)}" data-isbn="${candidates[0]}" data-original="${coverIsbn(isbn)}" data-candidates="${candidates.join(',')}" data-candidate="0" data-step="0" src="${coverUrl(candidates[0],0)}">` : googleId ? `<img alt="" loading="lazy" decoding="async" data-memo="${esc(memoKey)}" data-google-id="${googleId}" data-step="1" src="https://books.google.com/books/content?id=${googleId}&amp;printsec=frontcover&amp;img=1&amp;zoom=1">` : '';
   return `<span class="cover ${size}" aria-hidden="true">${spine}${img}</span>`;
 }
 function setCoverCaption(img,missing=false) {
@@ -133,15 +142,15 @@ function setCoverCaption(img,missing=false) {
   caption.textContent=text;caption.hidden=!text;
 }
 function nextCover(img) {
-  if (img.dataset.googleId) {setCoverCaption(img,true);img.remove();return;}
+  if (img.dataset.googleId && !img.dataset.isbn) {setCoverCaption(img,true);rememberCover(img,false);img.remove();return;}
   img.classList.remove('ok');
   const step=Number(img.dataset.step)+1;
   if (step<COVER_SOURCES.length) { img.dataset.step=String(step);img.src=coverUrl(img.dataset.isbn,step);return; }
-  const candidates=img.dataset.candidates.split(',');
+  const candidates=(img.dataset.candidates || '').split(',').filter(Boolean);
   const index=Number(img.dataset.candidate)+1;
   if (index<candidates.length) {
     img.dataset.candidate=String(index);img.dataset.isbn=candidates[index];img.dataset.step='0';img.src=coverUrl(candidates[index],0);
-  } else { setCoverCaption(img,true);img.remove(); }
+  } else { setCoverCaption(img,true);rememberCover(img,false);img.remove(); }
 }
 // 寸法が判明している「画像なし」と、正方形の刊行前の仮画像を除く。
 function isNoCoverImage(img) {
@@ -159,7 +168,7 @@ document.addEventListener('load', (e) => {
   const img = e.target;
   if (!(img instanceof HTMLImageElement) || !(img.dataset.isbn || img.dataset.googleId)) return;
   if (isNoCoverImage(img)) nextCover(img);
-  else { img.classList.add('ok'); setCoverCaption(img); }
+  else { img.classList.add('ok'); setCoverCaption(img); rememberCover(img,true); }
 }, true);
 
 const ICONS = {
@@ -168,6 +177,7 @@ const ICONS = {
  list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.1M4 12h.1M4 18h.1" stroke-width="3"/>',
  filter: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--paper)"/><circle cx="15" cy="17" r="2" fill="var(--paper)"/>',
  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+ calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
  arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
  bookmark: '<path d="M7 4h10v16l-5-3-5 3z"/>',
  book: '<path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H4zM13 7a3 3 0 0 1 3-3h4v14h-3a4 4 0 0 0-4 3"/>',
@@ -235,12 +245,25 @@ function workRow(w, owned, actLabel = '登録', opts = {}) {
   </li>`;
 }
 
-function toast(msg) {
+// action：{ label, run } を渡すと、知らせの右に「元に戻す」などのボタンを出す（少し長めに表示）
+function toast(msg, action = null) {
   const t = $('#toast');
+  // 詳細などの画面を開いているときは、その上に出す（開いた画面はページより前面にあるため）
+  const host = sheet.open ? sheet : document.body;
+  if (t.parentElement !== host) host.append(t);
   t.textContent = msg;
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => { t.hidden = true; action.run(); }, { once: true });
+    t.append(btn);
+  }
+  t.classList.toggle('has-action', !!action);
   t.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { t.hidden = true; }, 2600);
+  toast.timer = setTimeout(() => { t.hidden = true; }, action ? 6000 : 2600);
 }
 
 const loading = (msg) => `<p class="loading"><span class="dot"></span>${esc(msg)}</p>`;
@@ -293,7 +316,8 @@ function watchShelfEnd(list) {
 function renderShelf() {
   stopShelfLoading();
   if (ui.sort==='series') { renderSeriesShelf(); return; }
-  const all=store.books();
+  // 本棚は「これから読む本」を並べる場所。読了の本は「記録」に残し、本棚には出さない（本人の希望）
+  const all=store.books().filter(b=>b.status!=='done');
   const q=normName(ui.q);
   const list=sortShelfBooks(all.filter(b=>(!ui.genre || belongsToGenre(b,ui.genre))
     && (!q || normName(`${b.title}${b.author}${b.note}${b.memo}${b.publisher}`).includes(q))),ui.sort,ui.sort==='year' ? ui.yearDirection : ui.addedDirection);
@@ -326,6 +350,7 @@ function renderShelf() {
 }
 
 function emptyShelf(total) {
+  if (!total && store.books().length) return `<div class="empty"><p class="empty-title">本棚の本はすべて読み終えました</p><p>読んだ本は「記録」にあります。右上の「本を追加」から、次に読みたい本を入れましょう。</p></div>`;
   if (!total) return `<div class="empty"><p class="empty-title">本棚はまだ空です</p><p>右上の「本を追加」から、次に読みたい本を入れてみましょう。</p></div>`;
   return `<div class="empty"><p class="empty-title">条件に合う本がありません</p><p>ジャンルを切り替えるか、検索の文字を消してください。</p></div>`;
 }
@@ -394,7 +419,7 @@ function drawSeries() {
 
 function renderSeriesShelf() {
   view.innerHTML = `<section class="shelf shelf-sort-series">
-    ${pageHead('本棚', `${store.books().length}冊`)}
+    ${pageHead('本棚', `${store.books().filter(b=>b.status!=='done').length}冊`)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
     </div>
@@ -475,12 +500,18 @@ async function checkSeries() {
 
 // ---------------------------------------------------------------- 本の詳細
 function renderSheetBook(id) {
+  datePick=null;
   stopBookPreview();
   stopScanning();
   flushMemo();
   const b = store.get(id);
   if (!b) { closeSheet(); return; }
   const genresOpen = openId === id && !!$('.genre-select')?.open;
+  // 同じ本を描き直すとき（評価・状態などを変えたとき）は、表紙とあらすじの要素をそのまま使う（表紙が一瞬消えない）
+  const same = openId === id && sheet.open && sheetBody.dataset.bookKey === `${id}|${b.isbn}|${b.title}|${b.author}|${JSON.stringify(b.coverIsbns || b.coverIsbn || [])}`;
+  const keepCover = same ? sheetBody.querySelector('.detail-head > .cover') : null;
+  const keepSynopsis = same ? $('#book-synopsis') : null;
+  const scrollTop = same ? sheetBody.scrollTop : 0;
   openId = id;
   const isbn = (b.isbn || '').replace(/[^\dXx]/g, ''); // リンクに埋め込むので数字と X 以外は捨てる
   // 国会図書館のリンクは https://ndlsearch.ndl.go.jp/ のものだけ使う（読み込んだバックアップに別の URL があっても飛ばない）
@@ -500,12 +531,15 @@ function renderSheetBook(id) {
       </div>
     </div>
 
+    <section class="book-synopsis" id="book-synopsis" aria-labelledby="book-synopsis-title"><h3 id="book-synopsis-title" class="label">あらすじ</h3><div class="synopsis-body">${loading('あらすじを読み込んでいます…')}</div></section>
+
     <div class="field"><span class="label">読書状態</span><div class="seg">${seg('set-status', STATUS_ORDER.map((s) => [s, STATUS[s].label]), b.status)}</div></div>
     ${b.status === 'done'
     ? `<div class="field two">
-        <div><span class="label">評価</span><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="star ${n <= b.rating ? 'on' : ''}" data-act="set-rating" data-v="${n}" aria-label="${n}点">★</button>`).join('')}</div></div>
-        <label><span class="label">読み終えた日</span><input id="f-finished" type="date" value="${esc(b.finishedAt)}"></label>
-      </div>`
+        <div><span class="label">評価</span><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="star ${n <= b.rating ? 'on' : ''}" data-act="set-rating" data-v="${n}" aria-label="${n}点" aria-pressed="${n <= b.rating}">★</button>`).join('')}</div></div>
+        <div><span class="label" id="finished-label">読み終えた日</span><button type="button" class="date-btn" data-act="date-open" aria-expanded="false" aria-controls="finished-pop" aria-describedby="finished-label">${b.finishedAt ? esc(publicationLabel(b.finishedAt)) : '<span class="muted">日付を選ぶ</span>'}${icon('calendar')}</button></div>
+      </div>
+      <div class="date-pop" id="finished-pop" hidden></div>`
     : `<div class="field"><span class="label">気になり度</span><div class="seg">${seg('set-prio', [[3, '本命'], [2, '気になる'], [1, '見かけた']], b.priority)}</div></div>`}
 
     <details class="field genre-select" ${genresOpen ? 'open' : ''}><summary>ジャンル<span>${esc((b.genres || []).map((id) => GENRE_BY_ID[id]?.name || '').filter(Boolean).join('、') || '未設定')}</span></summary><div class="chips wrap">${GENRES.map((g) => `<button type="button" class="chip small ${b.genres?.includes(g.id) ? 'on' : ''}" data-act="toggle-genre" data-v="${g.id}" aria-pressed="${!!b.genres?.includes(g.id)}">${esc(g.name)}</button>`).join('')}</div></details>
@@ -541,10 +575,52 @@ function renderSheetBook(id) {
     </details>
 
     <div class="sheet-foot">
-      <button type="button" class="danger" data-act="delete" data-armed="0">本棚から消す</button>
+      <button type="button" class="danger" data-act="delete">${b.status === 'done' ? '記録から消す' : '本棚から消す'}</button>
       <span class="muted small">追加 ${esc(b.addedAt || '')}</span>
     </div>`;
+  sheetBody.dataset.bookKey = `${id}|${b.isbn}|${b.title}|${b.author}|${JSON.stringify(b.coverIsbns || b.coverIsbn || [])}`;
+  if (keepCover) sheetBody.querySelector('.detail-head > .cover')?.replaceWith(keepCover);
+  if (keepSynopsis) $('#book-synopsis').replaceWith(keepSynopsis);
+  else loadBookSynopsis(b);
   showSheet();
+  sheetBody.scrollTop = scrollTop;
+}
+
+// 本棚の本のあらすじ（本の情報と同じく NDL・openBD。24 時間この端末に保存）
+let bookSynopsis = null;
+function loadBookSynopsis(b) {
+  bookSynopsis?.controller.abort();
+  const controller = new AbortController();
+  bookSynopsis = { controller, id: b.id };
+  const put = (html) => { if (bookSynopsis?.controller === controller) { const el = $('#book-synopsis .synopsis-body'); if (el) el.innerHTML = html; } };
+  loadBookDetails({ isbn: b.isbn, title: b.title, author: b.author }, { signal: controller.signal }).then((info) => {
+    put(info.synopsis
+      ? `<p class="synopsis-text clamp">${esc(info.synopsis)}</p><button type="button" class="link small more-synopsis" data-act="synopsis-more" hidden>続きを読む</button>`
+      : `<p class="muted small">${info.failed ? 'あらすじを読み込めませんでした。' : 'この本のあらすじは、まだ提供されていません。'}</p>`);
+    const p = $('#book-synopsis .synopsis-text');
+    if (p && p.scrollHeight > p.clientHeight + 4) $('#book-synopsis .more-synopsis').hidden = false;
+  }).catch(() => { if (!controller.signal.aborted) put('<p class="muted small">あらすじを読み込めませんでした。</p>'); });
+}
+
+// 読み終えた日：アプリの見た目に合わせたカレンダー（スマホ標準・ブラウザ標準の日付選択は使わない）
+let datePick = null; // { month: 'YYYY-MM' }
+function drawDatePicker() {
+  const pop = $('#finished-pop');
+  const b = store.get(openId);
+  if (!pop || !b || !datePick) return;
+  const t = today();
+  const [y, m] = datePick.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const days = new Date(y, m, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < first.getDay(); i++) cells.push('<span class="dp-blank" aria-hidden="true"></span>');
+  for (let d = 1; d <= days; d++) {
+    const date = `${datePick.month}-${String(d).padStart(2, '0')}`;
+    cells.push(`<button type="button" class="dp-day${date === b.finishedAt ? ' on' : ''}${date === t ? ' today' : ''}${new Date(y, m - 1, d).getDay() === 0 ? ' sun' : ''}" data-act="dp-pick" data-date="${date}" aria-pressed="${date === b.finishedAt}" aria-label="${y}年${m}月${d}日">${d}</button>`);
+  }
+  pop.innerHTML = `<div class="dp-head"><button type="button" class="icon-btn" data-act="dp-move" data-v="-1" aria-label="前の月">‹</button><b>${y}年${m}月</b><button type="button" class="icon-btn" data-act="dp-move" data-v="1" aria-label="次の月">›</button></div>
+    <div class="dp-grid">${WEEKDAYS.map((w, i) => `<span class="dp-dow${i === 0 ? ' sun' : ''}" aria-hidden="true">${w}</span>`).join('')}${cells.join('')}</div>
+    <div class="dp-foot"><button type="button" class="ghost small" data-act="dp-pick" data-date="${t}">今日</button>${b.finishedAt ? '<button type="button" class="ghost small" data-act="dp-pick" data-date="">日付を消す</button>' : ''}</div>`;
 }
 
 
@@ -569,7 +645,21 @@ function closeSheet() {
   stopScanning();
   if (sheet.open) sheet.close();
   unlockPage(); // close イベントを待たずに戻す（このあと別の画面へ移るときに位置がずれない）
+  sheetClosed();
+}
+
+// 詳細を開いている間に本棚が変わったら、閉じたあとで本棚を描き直す（開いている間に後ろの表紙が点滅しない）
+let pendingRender = false;
+function sheetClosed() {
   openId = null;
+  datePick = null;
+  bookSynopsis?.controller.abort();
+  bookSynopsis = null;
+  if (!pendingRender) return;
+  pendingRender = false;
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
 }
 
 // ---------------------------------------------------------------- 本を登録
@@ -660,7 +750,7 @@ function renderBookPreview(book,origin) {
     <p id="preview-source" class="preview-source"></p><div id="preview-action" class="preview-action"></div>
   </article>`;
   showSheet();
-  sheet.scrollTop=0;
+  sheetBody.scrollTop=0;
   drawPreviewAction(state);
   requestPreviewInfo(state);
 }
@@ -1051,7 +1141,7 @@ function renderCalendarDay(date) {
       </div>
     </li>`).join('')}</ul>` : '<p class="muted">この日に出る本はありません。</p>'}`;
   showSheet();
-  sheet.scrollTop = 0;
+  sheetBody.scrollTop = 0;
   items.forEach(async (it, i) => {
     const put = (text) => { if (daySheet?.controller === controller) { const el = $(`#day-syn-${i}`); if (el) el.textContent = text; } };
     try {
@@ -1586,6 +1676,7 @@ store.subscribe((ev) => {
   if (['release-covers', 'releases', 'follows'].includes(ev.type)) { if (route.name==='author' && !route.arg) renderAuthorHome(); return; }
   if (route.name === 'author' && !route.arg) { renderAuthorHome(); return; }
   if (route.name === 'shelf' || route.name === 'stats') {
+    if (sheet.open && openId) { pendingRender = true; return; } // 詳細を閉じたら描き直す
     const focused = document.activeElement?.id;
     render();
     if (focused === 'shelf-q') { const el = $('#shelf-q'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -1628,8 +1719,38 @@ const actions = {
   close: () => closeSheet(),
   author: (el) => { closeSheet(); location.hash = `#author/${encodeURIComponent(el.dataset.name)}`; },
   'set-status': (el) => {
+    const was = store.get(openId)?.status;
     store.update(openId, { status: el.dataset.v });
     renderSheetBook(openId);
+    if (el.dataset.v === 'done' && was !== 'done') toast('読了にしました。本棚から外れて、「記録」に残ります');
+    if (el.dataset.v !== 'done' && was === 'done') toast('本棚に戻しました');
+  },
+  'date-open': (el) => {
+    const pop = $('#finished-pop');
+    if (!pop) return;
+    if (datePick) { datePick = null; pop.hidden = true; el.setAttribute('aria-expanded', 'false'); return; }
+    datePick = { month: (publicationDate(store.get(openId)?.finishedAt) || today()).slice(0, 7) };
+    if (datePick.month.length!==7) datePick.month=today().slice(0,7);
+    pop.hidden = false;
+    el.setAttribute('aria-expanded', 'true');
+    drawDatePicker();
+  },
+  'dp-move': (el) => {
+    if (!datePick) return;
+    const [y, m] = datePick.month.split('-').map(Number);
+    datePick.month = ymdOf(new Date(y, m - 1 + Number(el.dataset.v), 1)).slice(0, 7);
+    drawDatePicker();
+  },
+  'dp-pick': (el) => {
+    datePick = null;
+    store.update(openId, { finishedAt: el.dataset.date });
+    renderSheetBook(openId);
+  },
+  'synopsis-more': (el) => {
+    const p = $('#book-synopsis .synopsis-text');
+    if (!p) return;
+    p.classList.toggle('clamp');
+    el.textContent = p.classList.contains('clamp') ? '続きを読む' : '閉じる';
   },
   'set-prio': (el) => { store.update(openId, { priority: Number(el.dataset.v) }); renderSheetBook(openId); },
   'set-rating': (el) => {
@@ -1651,17 +1772,15 @@ const actions = {
     renderSheetBook(openId);
     toast('保存しました');
   },
-  delete: (el) => {
-    if (el.dataset.armed !== '1') {
-      el.dataset.armed = '1';
-      el.textContent = 'もう一度押すと消します';
-      setTimeout(() => { if (el.isConnected) { el.dataset.armed = '0'; el.textContent = '本棚から消す'; } }, 4000);
-      return;
-    }
+  // 1 回で消す（本人の希望）。間違えたときのために、知らせに「元に戻す」を 6 秒出す
+  delete: () => {
     const b = store.get(openId);
-    store.remove(openId);
+    if (!b) return;
+    const index = store.indexOf(b.id);
+    const copy = structuredClone(b);
+    store.remove(b.id);
     closeSheet();
-    toast(`「${mainTitle(b.title)}」を本棚から消しました`);
+    toast(`「${mainTitle(b.title)}」を${b.status === 'done' ? '記録' : '本棚'}から消しました`, { label: '元に戻す', run: () => { store.restore(copy, index); toast('元に戻しました'); } });
   },
   'add-work': (el) => {
     const w = workCache.get(el.dataset.key);
@@ -1859,8 +1978,8 @@ sheet.addEventListener('close', () => {
   stopBookPreview();
   stopScanning();
   flushMemo();
-  openId = null;
   unlockPage();
+  sheetClosed();
 });
 
 // ---------------------------------------------------------------- 起動

@@ -63,6 +63,11 @@ export function mergeSyncData(local, remote) {
   const readLog = {};
   for (const src of [remote.readLog, local.readLog]) for (const [d, ids] of Object.entries(src || {})) readLog[d] = union(readLog[d], ids);
   return {
+    favoriteGenres: ((local.preferencesAt || '') === (remote.preferencesAt || '')
+      ? (JSON.stringify(local.favoriteGenres || []) >= JSON.stringify(remote.favoriteGenres || []) ? local.favoriteGenres : remote.favoriteGenres)
+      : (local.preferencesAt || '') > (remote.preferencesAt || '') ? local.favoriteGenres : remote.favoriteGenres) || [],
+    preferencesAt: later(local.preferencesAt || '',remote.preferencesAt || ''),
+    onboardingDone: !!(local.onboardingDone || remote.onboardingDone || books.length),
     books, removed, deletedSeedIds, seedVersion: Math.max(local.seedVersion || 0, remote.seedVersion || 0),
     follows: followList, unfollowed,
     dismissed: union(local.dismissed, remote.dismissed), hiddenRecs: union(local.hiddenRecs, remote.hiddenRecs),

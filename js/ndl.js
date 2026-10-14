@@ -8,7 +8,6 @@ import {
 
 const BASE = 'https://ndlsearch.ndl.go.jp/api/opensearch';
 const GAP_MS = 1200;
-const TIMEOUT_MS = 9000; // 止まった問い合わせは、やり直すと1〜3秒で返ることが多い
 const TTL_MS = 7 * 24 * 3600 * 1000;
 // v0.9 で刊行月（「2023.12」）の読み取りを直したので、以前の保存分（ndl:）は使わずに消す
 const CACHE_PREFIX = 'ndl2:';
@@ -17,20 +16,20 @@ try { Object.keys(localStorage).filter((k) => k.startsWith('ndl:')).forEach((k) 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let last = 0;
-let chain = Promise.resolve();
-
-function schedule(task) {
-  const run = chain.then(async () => {
-    const wait = last + GAP_MS - Date.now();
-    if (wait > 0) await sleep(wait);
-    try {
-      return await task();
-    } finally {
-      last = Date.now();
-    }
-  });
-  chain = run.catch(() => {});
-  return run;
+const jobs=[];let draining=false;
+function schedule(task,priority=2) {
+  const result=new Promise((resolve,reject)=>jobs.push({task,priority,resolve,reject}));
+  drain();return result;
+}
+async function drain() {
+  if(draining)return;draining=true;
+  while(jobs.length) {
+    const wait=last+GAP_MS-Date.now();if(wait>0)await sleep(wait);
+    jobs.sort((a,b)=>b.priority-a.priority);
+    const job=jobs.shift();
+    try {job.resolve(await job.task());}catch(e){job.reject(e);}finally{last=Date.now();}
+  }
+  draining=false;
 }
 
 function cacheGet(url, ttl) {
@@ -97,7 +96,7 @@ function parse(xml) {
 }
 
 // dpid: null を渡すと国会図書館以外（出版社の近刊情報 JPRO など）も含めて探す
-async function query(params, { ttl = TTL_MS } = {}) {
+async function query(params, { ttl = TTL_MS, priority=2 } = {}) {
   const merged = { dpid: 'iss-ndl-opac', mediatype: 'books', ...params };
   Object.keys(merged).forEach((k) => merged[k] == null && delete merged[k]);
   const url = `${BASE}?${new URLSearchParams(merged)}`;
@@ -105,10 +104,10 @@ async function query(params, { ttl = TTL_MS } = {}) {
   if (cached) return cached;
   return schedule(async () => {
     let offline = false;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < (priority===0?2:3); attempt++) {
       // NDL は時々応答しないまま止まるので、9 秒で打ち切ってやり直す
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+      const timer = setTimeout(() => ctrl.abort(), (priority===0?3000:4000)+attempt*2000);
       let res;
       let body;
       try {
@@ -133,7 +132,7 @@ async function query(params, { ttl = TTL_MS } = {}) {
     }
     if (offline) throw new Error('インターネットにつながっていません。通信できる場所でもう一度試してください。');
     throw new Error('国立国会図書館サーチが混み合っているか、応答がありません。1分ほど待ってからもう一度試してください。');
-  });
+  },priority);
 }
 
 // 版違い（単行本・文庫・新装版）を 1 作品にまとめる。漫画版と BOX セットは同名でも別物なので先に外す
@@ -183,16 +182,16 @@ function groupWorks(items, { includeComics = false } = {}) {
   return works;
 }
 
-export async function searchAuthor(name, { from } = {}) {
+export async function searchAuthor(name, { from, priority=2 } = {}) {
   const params = { creator: name, cnt: 200 };
   if (from) params.from = String(from);
   const mine = (items) => items.filter((it) => it.creators.some((c) => authorMatches(c, name))
     || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name)));
-  let own = mine(await query(params));
+  let own = mine(await query(params,{priority}));
   // 「ホリー・ジャクソン」のように NDL と表記順が違う名前は、いちばん長い部分（姓）で探し直す
   const longest = [...nameParts(name)].sort((a, b) => b.length - a.length)[0];
   if (!own.length && longest && longest !== normName(name)) {
-    own = mine(await query({ ...params, creator: longest }));
+    own = mine(await query({ ...params, creator: longest },{priority}));
   }
   return groupWorks(own).sort((a, b) => b.firstYear - a.firstYear);
 }
@@ -204,7 +203,7 @@ export async function searchIsbn(isbn) {
 
 // フォロー中の著者の新刊・近刊（出版社の近刊情報も含む）。新刊チェックは 6 時間だけ結果を使い回す
 export async function searchReleases(name, fromMonth) {
-  const items = await query({ creator: name, from: fromMonth, cnt: 60, dpid: null }, { ttl: 6 * 3600 * 1000 });
+  const items = await query({ creator: name, from: fromMonth, cnt: 60, dpid: null }, { ttl: 6 * 3600 * 1000, priority:0 });
   const own = items.filter((it) => isPrintRecord(it) && (it.creators.some((c) => authorMatches(c, name))
     || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name))));
   return groupWorks(own)
@@ -212,10 +211,10 @@ export async function searchReleases(name, fromMonth) {
     .sort((a, b) => b.lastMonth.localeCompare(a.lastMonth));
 }
 
-export async function searchTitle(title, author = '', {allSources=false, ttl=TTL_MS, cnt=40}={}) {
+export async function searchTitle(title, author = '', {allSources=false, ttl=TTL_MS, cnt=40, priority=2}={}) {
   const params = { title, cnt, ...(allSources ? {dpid:null} : {}) };
   if (author) params.creator = author;
-  const items = await query(params, { ttl });
+  const items = await query(params, { ttl, priority });
   const q = normTitle(title);
   const exact = (w) => (w.keys.includes(q) ? 0 : 1);
   return groupWorks(items).sort((a, b) => exact(a) - exact(b) || b.firstYear - a.firstYear);

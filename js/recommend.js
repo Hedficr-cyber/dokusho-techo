@@ -2,7 +2,7 @@
 // 1) 本棚によく出てくる著者の、まだ本棚にない作品
 // 2) 本棚に多いジャンルの、まだ本棚にいない著者（genres.js の代表著者）の作品
 // 国会図書館へは著者 1 人につき 1 回だけ問い合わせる。結果は ndl.js が 7 日間保存するので 2 回目からはすぐ出る。
-import { GENRE_BY_ID } from './genres.js';
+import { GENRE_BY_ID, GENRE_GROUP_BY_ID } from './genres.js';
 import { normName, normTitle } from './util.js';
 
 // 著者ごとの本棚の書名（正規化済み）。looksOwned で使う
@@ -44,8 +44,20 @@ function rotate(list, n, shift) {
 // どの著者を調べるかの計画。よく読む著者は上位 2 人を固定し、3〜12 位から 2 人を入れ替え。
 // 好きなジャンルの順に、まだ本棚にいない著者を合わせて 3 人（最初に見つかったジャンルから 2 人）。
 // 本棚がそのジャンルの代表著者で埋まっていれば、次のジャンルへ進む。
-export function recommendPlan(books, shift = 0) {
+export function recommendPlan(books, shift = 0, preferences = []) {
   const { authors, genres } = tasteProfile(books);
+  const selected=preferences.filter(id=>GENRE_GROUP_BY_ID[id]);
+  if (!authors.length && !genres.length) {
+    const groups=selected.length ? selected : ['mystery','fiction','horror'];
+    const defaults={money:['山崎元','橘玲','竹川美奈子','水瀬ケンイチ'],business:['山口周','安宅和人','樺沢紫苑'],nonfic:['沢木耕太郎','柳田邦男','門田隆将']};
+    const jobs=[];
+    for (const [i,id] of groups.entries()) {
+      const g=GENRE_GROUP_BY_ID[id];
+      const names=[...new Set(g.children.flatMap(child=>GENRE_BY_ID[child]?.authors || defaults[child] || []))];
+      rotate(names,groups.length===1 ? 4 : 2,shift+i).forEach(name=>jobs.push({name,kind:'genre',reason:`${g.name}が好きなあなたに`}));
+    }
+    return {jobs:jobs.slice(0,8),taste:groups.map(id=>GENRE_GROUP_BY_ID[id].name),fromPreferences:true};
+  }
   const onShelf = new Set(books.map((b) => normName(b.author)));
   const favorites = [...authors.slice(0, 2), ...rotate(authors.slice(2, 12), 2, shift)];
   const jobs = favorites.map(([name]) => ({ name, kind: 'shelf', reason: `${name}をよく読んでいるから` }));
@@ -90,15 +102,15 @@ function looksOwned(w, author, shelfTitles) {
 }
 
 // 調べた作品から、本棚にない本を著者ごとに新しい順で数冊選び、著者を交互に並べる
-export function pickRecommendations(results, { owned, hidden, shelfTitles = new Map(), limit = 20 }) {
+export function pickRecommendations(results, { owned, hidden, shelfTitles = new Map(), limit = 20, shift = 0 }) {
   const seen = new Set();
   const perJob = results.filter(Boolean).map(({ job, works }) => {
     const litShare = works.length ? works.filter((w) => w.isLit).length / works.length : 0;
-    const list = works
+    const eligible = works
       .filter((w) => !w.isComic && !w.isAnthology && (litShare < 0.6 || w.isLit) && !owned(w) && !hidden.has(w.key)
         && !looksOwned(w, job.name, shelfTitles))
-      .sort((a, b) => b.firstYear - a.firstYear)
-      .slice(0, job.kind === 'shelf' ? 3 : 2);
+      .sort((a, b) => b.firstYear - a.firstYear);
+    const list=rotate(eligible,job.kind==='shelf' ? 3 : 2,shift);
     return { job, list };
   });
   const out = [];

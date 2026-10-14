@@ -1,5 +1,6 @@
 // 本棚データの保存先。いまはこの端末のブラウザ（localStorage）に保存する。
 // 後でクラウド同期にするときは、このファイルの load/save だけを差し替える。
+import { GENRE_GROUP_BY_ID } from './genres.js';
 import { uid, today, normName, isPrintRecord } from './util.js';
 
 const KEY = 'dokusho-techo:v1';
@@ -13,16 +14,30 @@ const EMPTY = {
   readLog: {},      // 読んだ日 { 'YYYY-MM-DD': [本の id ...] }
   goals: {},        // 年間目標 { '2026': 50 }
   seriesCheckedAt: '', // 本棚のシリーズの新しい巻を最後に確かめた時刻
+  favoriteGenres: [], onboardingDone: false, preferencesAt: '',
   removed: {},      // 同期用：消した本 { 本の id: 消した時刻 }
   unfollowed: {},   // 同期用：フォローをやめた著者 { 著者名の比較キー: やめた時刻 }
 };
 let state = structuredClone(EMPTY);
 const listeners = new Set();
+let diskRaw=null;
+function refreshStoredState() {
+  try {
+    const raw=localStorage.getItem(KEY);
+    if (!raw || raw===diskRaw) return false;
+    state=prepareBackup(JSON.parse(raw)); diskRaw=raw;
+    return true;
+  } catch {return false;}
+}
+window.addEventListener('storage',e=>{
+  if (e.key===KEY && refreshStoredState()) listeners.forEach(fn=>fn({type:'external'}));
+});
 
 export function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) state = prepareBackup(JSON.parse(raw));
+    diskRaw=raw;
     // v0.7 までに点字版などの記録から新刊として拾ったもの（例：恋のゴンドラ）を外す
     // 本棚のシリーズの巻は、点字版の記録しかなくても続巻として残す（シリーズ側で古い巻を除いている）
     state.releases = state.releases.filter((r) => r.series || isPrintRecord(r));
@@ -35,7 +50,8 @@ export function load() {
 function save(type='change') {
   state.updatedAt = new Date().toISOString();
   try {
-    localStorage.setItem(KEY, JSON.stringify(state));
+    const raw=JSON.stringify(state);
+    localStorage.setItem(KEY, raw); diskRaw=raw;
   } catch (e) {
     console.warn('保存に失敗しました', e);
     listeners.forEach((fn) => fn({ type: 'save-error' }));
@@ -55,6 +71,7 @@ export async function mergeSeed(url) {
     const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) return 0;
     const seed = await res.json();
+    refreshStoredState();
     if ((seed.version || 0) <= (state.seedVersion || 0) && state.books.length) return 0;
     const have = new Set(state.books.map((b) => b.id));
     const gone = new Set(state.deletedSeedIds);
@@ -78,6 +95,7 @@ export async function mergeSeed(url) {
 }
 
 export function add(fields) {
+  refreshStoredState();
   const book = {
     id: uid(), title: '', author: '', status: 'want', priority: 2, genres: [], source: 'manual',
     note: '', photos: [], isbn: '', publisher: '', year: '', format: '', ndc: '', ndl: '',
@@ -92,6 +110,7 @@ export function add(fields) {
 }
 
 export function update(id, patch) {
+  refreshStoredState();
   const b = get(id);
   if (!b) return;
   if (patch.status === 'done' && b.status !== 'done' && !b.finishedAt && !('finishedAt' in patch)) {
@@ -102,6 +121,7 @@ export function update(id, patch) {
 }
 
 export function remove(id) {
+  refreshStoredState();
   const i = state.books.findIndex((b) => b.id === id);
   if (i < 0) return;
   if (id.startsWith('seed-')) state.deletedSeedIds.push(id);
@@ -112,6 +132,7 @@ export function remove(id) {
 
 // 「元に戻す」：消した本を同じ位置に戻し、消した印も外す
 export function restore(book, index = 0) {
+  refreshStoredState();
   if (!book?.id || get(book.id)) return;
   const removedAt=Date.parse(state.removed[book.id] || '') || 0;
   const restoredAt=new Date(Math.max(Date.now(),removedAt+1)).toISOString();
@@ -126,7 +147,7 @@ export const indexOf = (id) => state.books.findIndex((b) => b.id === id);
 export function prepareBackup(data) {
   const invalid = () => { throw new Error('読書手帖のバックアップファイルではありません'); };
   if (!data || !Array.isArray(data.books)) invalid();
-  const arrayFields = ['deletedSeedIds', 'follows', 'releases', 'dismissed', 'hiddenRecs', 'manualReadDays'];
+  const arrayFields = ['favoriteGenres','deletedSeedIds', 'follows', 'releases', 'dismissed', 'hiddenRecs', 'manualReadDays'];
   for (const k of arrayFields) if (k in data && !Array.isArray(data[k])) invalid();
   for (const k of ['readLog', 'goals']) if (k in data && (!data[k] || typeof data[k] !== 'object' || Array.isArray(data[k]))) invalid();
   if (data.books.some((b) => !b || typeof b.id !== 'string' || typeof b.title !== 'string'
@@ -152,7 +173,11 @@ export function prepareBackup(data) {
   if (Object.entries(data.readLog || {}).some(([d, ids]) => !isDate(d) || !Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) invalid();
   if ((data.manualReadDays || []).some((d) => !isDate(d))) invalid();
   if (data.books.some(b=>b.year!=null && !['string','number'].includes(typeof b.year))) invalid();
+  if (data.onboardingDone!=null && typeof data.onboardingDone!=='boolean') invalid();
+  if (!stringArray(data,'favoriteGenres') || !optionalStrings(data,['preferencesAt'])) invalid();
   const next = { ...structuredClone(EMPTY), ...structuredClone(data) };
+  // 以前の本棚・空に整理した既存端末も、新しい人向けの初期画面で遮らない。
+  if (!Object.hasOwn(data,'onboardingDone') || next.books.length) next.onboardingDone=true;
   // v0.2.0 の空配列は「本を指定せずに読んだ日」の印。
   if (!('manualReadDays' in data)) next.manualReadDays = Object.keys(next.readLog).filter((d) => !next.readLog[d].length);
   return next;
@@ -160,8 +185,9 @@ export function prepareBackup(data) {
 
 // ---------------------------------------------------------------- 同期（js/sync.js）
 // 端末の間でそろえる項目。新刊の一覧・表紙の照合・自動フォローは各端末で作り直すので送らない
-const SYNC_FIELDS = ['books', 'removed', 'deletedSeedIds', 'seedVersion', 'follows', 'unfollowed', 'dismissed', 'hiddenRecs', 'readLog', 'manualReadDays', 'goals'];
+const SYNC_FIELDS = ['books', 'removed', 'deletedSeedIds', 'seedVersion', 'favoriteGenres', 'preferencesAt', 'onboardingDone', 'follows', 'unfollowed', 'dismissed', 'hiddenRecs', 'readLog', 'manualReadDays', 'goals'];
 export function syncPayload() {
+  refreshStoredState();
   const data = {};
   for (const k of SYNC_FIELDS) data[k] = structuredClone(state[k]);
   data.follows = data.follows.filter((f) => !f.auto).map(({ name, addedAt, followedAt }) => ({ name, addedAt: addedAt || '', lastChecked: '', ...(followedAt ? { followedAt } : {}) }));
@@ -190,6 +216,7 @@ export const follows = () => state.follows;
 export const isFollowing = (name) => state.follows.some((f) => normName(f.name) === normName(name));
 
 export function follow(name) {
+  refreshStoredState();
   if (!name) return;
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f?.auto) { delete f.auto; save(); return; } // 本棚から外れてもフォローを残す
@@ -202,6 +229,7 @@ export function follow(name) {
 // 本棚の著者は自動でフォローする（auto: true）。本棚から著者の本がなくなったら、自動の分だけ外す。
 // 自分でフォローした著者（auto なし）はそのまま。変わったら true
 export function syncShelfFollows(names) {
+  refreshStoredState();
   const want = new Map(names.filter(Boolean).map((n) => [normName(n), n]));
   const before = JSON.stringify(state.follows);
   for (const [key, name] of want) {
@@ -215,6 +243,7 @@ export function syncShelfFollows(names) {
 }
 
 export function unfollow(name) {
+  refreshStoredState();
   state.follows = state.follows.filter((f) => normName(f.name) !== normName(name));
   state.unfollowed[normName(name)] = new Date().toISOString();
   // 本棚のシリーズの新しい巻は、フォローをやめても残す
@@ -244,6 +273,7 @@ function mergeReleases(items) {
 
 // 新刊チェックの結果を足す。もう知っている本・「表示しない」にした本は足さない。新しく見つかった件数を返す
 export function addReleases(name, items) {
+  refreshStoredState();
   if (!isFollowing(name)) return 0;
   const n = mergeReleases(items);
   const f = state.follows.find((x) => normName(x.name) === normName(name));
@@ -255,6 +285,7 @@ export function addReleases(name, items) {
 // 本棚のシリーズの、まだ持っていない新しい巻・発売予定の巻（フォローしていない著者でも出す）
 export const seriesCheckedAt = () => state.seriesCheckedAt || '';
 export function addSeriesReleases(items) {
+  refreshStoredState();
   const n = mergeReleases(items.map((r) => ({ ...r, series: r.series || r.baseTitle || r.title })));
   state.seriesCheckedAt = new Date().toISOString();
   save('releases');
@@ -263,6 +294,7 @@ export function addSeriesReleases(items) {
 
 // 表紙の補充だけを保存。既読状態/新刊件数/フォローの確認時刻は変えない。
 export function updateReleaseCovers(key,patch) {
+  refreshStoredState();
   const item=state.releases.find(r=>r.key===key);
   if (!item) return;
   if (!item.isbn && patch.isbn) item.isbn=patch.isbn;
@@ -272,12 +304,14 @@ export function updateReleaseCovers(key,patch) {
 }
 
 export function markReleasesSeen() {
+  refreshStoredState();
   if (!state.releases.some((r) => !r.seen)) return;
   state.releases.forEach((r) => { r.seen = true; });
   save('releases');
 }
 
 export function dismissRelease(key) {
+  refreshStoredState();
   state.releases = state.releases.filter((r) => r.key !== key);
   if (!state.dismissed.includes(key)) state.dismissed.push(key);
   save();
@@ -286,6 +320,7 @@ export function dismissRelease(key) {
 // ---------------------------------------------------------------- おすすめ
 export const hiddenRecs = () => state.hiddenRecs;
 export function hideRec(key) {
+  refreshStoredState();
   if (!key || state.hiddenRecs.includes(key)) return;
   state.hiddenRecs.push(key);
   save();
@@ -295,6 +330,7 @@ export function hideRec(key) {
 export const readLog = () => state.readLog;
 
 export function setReadDay(date, on, bookId = '') {
+  refreshStoredState();
   const ids = new Set(state.readLog[date] || []);
   if (on) {
     if (bookId) ids.add(bookId);
@@ -313,7 +349,16 @@ export function setReadDay(date, on, bookId = '') {
 
 export const goal = (y) => Number(state.goals[y] || 0);
 export function setGoal(y, n) {
+  refreshStoredState();
   if (n > 0) state.goals[y] = n;
   else delete state.goals[y];
   save();
+}
+
+// 新しい利用者の好み（本棚が空でもおすすめを出す）。後から変更できる。
+export function setFavoriteGenres(ids) {
+  refreshStoredState();
+  state.favoriteGenres=[...new Set(ids.filter(id=>GENRE_GROUP_BY_ID[id]))];
+  state.onboardingDone=true; state.preferencesAt=new Date().toISOString();
+  save('preferences');
 }

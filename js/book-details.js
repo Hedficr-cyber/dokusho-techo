@@ -82,25 +82,81 @@ async function read(url,signal,kind,{attempts=3,wait=4000}={}) {
     catch(e) {if (signal?.aborted || i>=attempts) throw e;await new Promise(r=>setTimeout(r,300*i));}
   }
 }
-export async function loadBookDetails(book,{signal}={}) {
+async function fetchBookDetails(book,{background=false}={}) {
   const isbn=coverIsbn(book.isbn),key=PREFIX+(isbn || `${normTitle(book.title)}|${normName(book.author)}`);
-  try {const hit=JSON.parse(localStorage.getItem(key) || 'null');if(hit?.data && Date.now()-hit.at<TTL) return hit.data;} catch {}
+  const signal=undefined;
+  const hit=cached(book);if(hit && Date.now()-hit.at<(hit.data.failed ? 60000 : TTL)) return hit.data;
   const query=isbn ? `isbn=${cql(isbn)}` : `title=${cql(book.title)} AND creator=${cql(book.author)}`;
   const params=new URLSearchParams({operation:'searchRetrieve',version:'1.2',recordSchema:'dcndl',recordPacking:'xml',onlyBib:'true',maximumRecords:'8',query});
   // NDL と openBD を同時に聞き、あらすじのある方を使う。刊行日は細かい方（日付まで分かる方）を使う
+  const publish=data=>{
+    memory.set(key,{at:Date.now(),data});
+    if(data.synopsis)try{localStorage.setItem(key,JSON.stringify({at:Date.now(),data}));}catch{}
+    listeners.forEach(fn=>fn(key));
+  };
+  const early=data=>{if(data?.synopsis)publish(data);return data;};
   const [ndl,openBd]=await Promise.allSettled([
-    read('https://ndlsearch.ndl.go.jp/api/sru?'+params,signal,'xml').then(x=>parseNdlDetails(x,book)),
-    isbn ? read('https://api.openbd.jp/v1/get?isbn='+isbn,signal,'json',{attempts:2}).then(x=>parseOpenBdDetails(x,isbn)) : Promise.resolve(null),
+    read('https://ndlsearch.ndl.go.jp/api/sru?'+params,signal,'xml',{attempts:background?2:3,wait:background?3000:4000}).then(x=>early(parseNdlDetails(x,book))),
+    isbn ? read('https://api.openbd.jp/v1/get?isbn='+isbn,signal,'json',{attempts:2}).then(x=>early(parseOpenBdDetails(x,isbn))) : Promise.resolve(null),
   ]);
   if (signal?.aborted) throw new DOMException('Aborted','AbortError');
   const found=[ndl,openBd].map(r=>r.status==='fulfilled' ? r.value : null);
   const failed=[ndl,openBd].some(r=>r.status==='rejected');
   const base=found.find(r=>r?.synopsis) || found.find(Boolean);
   const result=base && {...base,publishedAt:found.map(r=>r?.publishedAt || '').sort((a,b)=>b.length-a.length)[0]};
-  const data=result || {synopsis:'',publishedAt:'',source:'',sourceUrl:''};
+  const data=result?.synopsis ? result : (hit?.data.synopsis ? hit.data : result || {synopsis:'',publishedAt:'',source:'',sourceUrl:''});
   data.failed=failed && !data.synopsis;
   if (!data.failed) {
-    try {const keys=Object.keys(localStorage).filter(k=>k.startsWith(PREFIX));if(keys.length>=60)keys.slice(0,10).forEach(k=>localStorage.removeItem(k));localStorage.setItem(key,JSON.stringify({at:Date.now(),data}));} catch {}
+    try {const keys=Object.keys(localStorage).filter(k=>k.startsWith(PREFIX));if(keys.length>=400)keys.slice(0,40).forEach(k=>localStorage.removeItem(k));localStorage.setItem(key,JSON.stringify({at:Date.now(),data}));} catch {}
   }
+  memory.set(key,{at:Date.now(),data});
+  listeners.forEach(fn=>fn(key));
   return data;
+}
+
+const memory=new Map(),pending=new Map(),jobs=[],listeners=new Set();
+let working=0,dispatching=false,lastRequest=0;
+export const bookDetailsKey=book=>PREFIX+(coverIsbn(book.isbn) || `${normTitle(book.title)}|${normName(book.author)}`);
+function cached(book) {
+  const key=bookDetailsKey(book);
+  if (memory.has(key)) return memory.get(key);
+  try {const hit=JSON.parse(localStorage.getItem(key) || 'null');if(hit?.data && typeof hit.data.synopsis==='string'){memory.set(key,hit);return hit;}} catch {}
+  return null;
+}
+export const peekBookDetails=book=>cached(book)?.data || null;
+export const subscribeBookDetails=fn=>(listeners.add(fn),()=>listeners.delete(fn));
+async function drain() {
+  if(dispatching)return;dispatching=true;
+  while(jobs.length && working<2) {
+    const wait=lastRequest+1000-Date.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));
+    jobs.sort((a,b)=>b.priority-a.priority);
+    const job=jobs.shift();working++;lastRequest=Date.now();
+    fetchBookDetails(job.book,{background:job.priority===0}).then(job.resolve,job.reject).finally(()=>{
+      working--;pending.delete(job.key);drain();
+    });
+  }
+  dispatching=false;
+}
+export function loadBookDetails(book,{signal,background=false}={}) {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted','AbortError'));
+  const hit=cached(book);
+  const cooldown=hit?.data.failed ? 60000 : TTL;
+  if (hit && Date.now()-hit.at<cooldown) return Promise.resolve(hit.data);
+  const key=bookDetailsKey(book);
+  let job=pending.get(key);
+  if (!job) {
+    let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+    job={key,book:{isbn:book.isbn || '',title:book.title || '',author:book.author || ''},priority:background?0:2,promise,resolve,reject};
+    pending.set(key,job);jobs.push(job);drain();
+  } else if (!background) job.priority=2;
+  if (!signal) return job.promise;
+  // 詳細を閉じても先読みは続け、閉じた画面への描画だけを取り消す。
+  return new Promise((resolve,reject)=>{
+    const abort=()=>reject(new DOMException('Aborted','AbortError'));
+    signal.addEventListener('abort',abort,{once:true});
+    job.promise.then(data=>{if(signal.aborted)abort();else resolve(data);},reject).finally(()=>signal.removeEventListener('abort',abort));
+  });
+}
+export function prefetchBookDetails(books) {
+  for (const book of books) if (book?.title) loadBookDetails(book,{background:true}).catch(()=>{});
 }

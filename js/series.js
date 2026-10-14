@@ -165,18 +165,37 @@ const bookStory = (book, stories) => {
 };
 
 // 端末に覚えておく分：著者の作品一覧のうち、シリーズの巻に当たる作品だけを、必要な項目だけで
-export function seriesWorksOf(works) {
+// full：何冊も読んでいる著者は、単発作品の図鑑のために小説の作品もすべて（版は最初の 2 つと最新だけ）覚える
+export function seriesWorksOf(works, { full = false } = {}) {
   const keep = new Set();
   for (const g of storySeries(works)) g.works.forEach((x) => keep.add(x.work));
   for (const w of works || []) {
     if (!w.isComic && CATALOG.some((e) => e.vols.some((v) => v.keys.some((k) => w.keys?.includes(k))))) keep.add(w);
   }
-  return (works || []).filter((w) => keep.has(w)).map((w) => ({
+  const extra = new Set(full ? (works || []).filter((w) => !keep.has(w) && isNovel(w)) : []);
+  const trim = (eds) => (eds.length <= 3 ? eds : [...eds.slice(0, 2), eds[eds.length - 1]]);
+  return (works || []).filter((w) => keep.has(w) || extra.has(w)).map((w) => ({
     key: w.key, title: w.title, main: w.main, volume: w.volume || '', keys: w.keys || [], isbns: (w.isbns || []).filter(Boolean), ndc: w.ndc || '', creators: w.creators || [],
     authorLabel: w.authorLabel || '', firstYear: w.firstYear || 0, lastMonth: w.lastMonth || '', isComic: !!w.isComic, isAnthology: !!w.isAnthology,
     latest: w.latest ? { isbn: w.latest.isbn || '', publisher: w.latest.publisher || '', link: w.latest.link || '', publishedAt: w.latest.publishedAt || '', issued: w.latest.issued || '', format: w.latest.format || '' } : null,
-    editions: (w.editions || []).map((e) => ({ title: e.title || '', volume: e.volume || '', series: e.series || '', isbn: e.isbn || '', month: e.month || '', year: e.year || 0, publishedAt: e.publishedAt || '' })),
+    editions: (extra.has(w) ? trim(w.editions || []) : (w.editions || [])).map((e) => ({ title: e.title || '', volume: e.volume || '', series: e.series || '', isbn: e.isbn || '', month: e.month || '', year: e.year || 0, publishedAt: e.publishedAt || '' })),
   }));
+}
+
+// ---------------------------------------------------------------- 単発作品（v0.14.4）
+// シリーズ（組み込みの一覧・国会図書館のシリーズ名・巻数）に入らない小説。上・下は 1 作品
+const isNovel = (w) => !w.isComic && !w.isAnthology && (!w.ndc || /^9/.test(w.ndc));
+const SPLIT_PART = /[\s　]*[(（]?(上|中|下|上巻|中巻|下巻|前編|後編)[)）]?$/;
+export const workBase = (title) => plain(mainTitle(title)).replace(SPLIT_PART, '').trim();
+// groups：本棚のシリーズ（shelfSeries の結果）。巻数のシリーズの 1 巻目（巻数なし）も単発にしない
+export function standaloneWorks(works, author, groups = []) {
+  const a = normName(author);
+  const inStory = new Set(storySeries(works).flatMap((g) => g.works.map((x) => x.work)));
+  const bases = new Set(groups.filter((g) => !g.named && normName(g.author) === a).map((g) => normTitle(g.base)));
+  return (works || []).filter((w) => isNovel(w) && !inStory.has(w)
+    && !splitVolume(w.main || w.title, w.volume).vol
+    && !bases.has(normTitle(w.main))
+    && !CATALOG.some((e) => catalogAuthor(e, a) && e.vols.some((v) => v.keys.some((k) => w.keys?.includes(k)))));
 }
 
 // ---------------------------------------------------------------- 本棚のシリーズ
@@ -243,7 +262,7 @@ export function shelfSeries(books, { stories = new Map() } = {}) {
 
 // ---------------------------------------------------------------- 巻の情報
 // 作品の最初に出た月（月まで分かる版を優先。年しか分からなければ最も古い年）・発売日・表紙の ISBN
-function volInfo(w) {
+export function volInfo(w) {
   if (!w) return { month: '', publishedAt: '', isbn: '', publisher: '', link: '', ndc: '', coverIsbns: [], work: null, upcoming: false };
   const thisMonth = today().slice(0, 7);
   const editions = (w.editions || []).filter((e) => e.month || e.year);

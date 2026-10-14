@@ -12,7 +12,7 @@ import {
 
 import { loadBookDetails, peekBookDetails, prefetchBookDetails, bookDetailsKey, subscribeBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
-import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES } from './series.js';
+import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo } from './series.js';
 import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
@@ -1630,20 +1630,69 @@ const zbar = (a, b) => `<span class="zbar" aria-hidden="true"><i style="width:${
 const ZUKAN_STATE = { read: '読了', shelf: '本棚にある・まだ読んでいない', missing: 'まだ読んでいない', coming: '発売予定' };
 const cardState = (v) => (v.book?.status === 'done' ? 'read' : v.book ? 'shelf' : v.upcoming ? 'coming' : 'missing');
 
+// 読んだ本はすべて図鑑に入る：シリーズの本はシリーズのバインダーに、シリーズでない本は著者ごとの「単発作品」に。
+// 何冊も読んでいる著者（ZUKAN_FULL_MIN 冊以上）の単発作品は、まだ持っていない作品も薄いカードで並べる
+// （本人：単発の作品は 1 つの図鑑に。何冊も読んでいる作者なら本棚にない単発作品も入れて、手に取るきっかけに）
+const OTHERS = '単発作品';
+const ZUKAN_FULL_MIN = 3;
+const readCountOf = (key) => store.books().filter((b) => b.status === 'done' && normName(b.author) === key).length;
 function zukanAuthors() {
   const by = new Map();
-  for (const s of currentSeries()) {
+  const inSeries = new Set();
+  const groups = currentSeries();
+  const author = (name) => {
+    const k = normName(name);
+    if (!by.has(k)) by.set(k, { key: k, name, series: [], read: 0, total: 0 });
+    return by.get(k);
+  };
+  for (const s of groups) {
     const d = describeSeries(s, fetchedFor(s));
-    if (!isRealSeries(d) || !d.done) continue;
-    const k = normName(d.author);
-    if (!by.has(k)) by.set(k, { key: k, name: d.author, series: [], read: 0, total: 0 });
-    const a = by.get(k);
+    if (!isRealSeries(d)) continue;
+    for (const v of d.vols) if (v.book) inSeries.add(v.book.id);
+    if (s.named) s.members.forEach((m) => inSeries.add(m.book.id)); else s.owned.forEach((b) => inSeries.add(b.id));
+    if (!d.done) continue;
+    const a = author(d.author);
     a.series.push(d); a.read += d.done; a.total += d.total;
   }
+  // 単発作品：シリーズに入らない本（読了の本がある著者だけ）。上・下は 1 枚
+  const others = new Map();
+  for (const b of store.books()) {
+    if (!b.author || inSeries.has(b.id)) continue;
+    const k = normName(b.author);
+    if (!others.has(k)) others.set(k, { name: b.author, books: [] });
+    others.get(k).books.push(b);
+  }
+  for (const [k, o] of others) {
+    if (!o.books.some((b) => b.status === 'done')) continue;
+    const items = [];
+    const find = (b) => items.find((it) => it.keys.has(normTitle(workBase(b.title))) || (b.isbn && it.isbns.has(b.isbn)));
+    const full = authorWorks.get(k);
+    if (full?.full && readCountOf(k) >= ZUKAN_FULL_MIN) {
+      for (const w of standaloneWorks(full.works, o.name, groups)) {
+        items.push({ title: workBase(w.main), keys: new Set([normTitle(workBase(w.main)), ...(w.keys || [])]), isbns: new Set(w.isbns || []), info: volInfo(w), book: null });
+      }
+    }
+    for (const b of o.books) {
+      if (b.status !== 'done' && !find(b)) continue; // 持っていない作品の一覧にない本棚の本は出さない（読了の本だけ足す）
+      let it = find(b);
+      if (!it) items.push(it = { title: workBase(b.title), keys: new Set([normTitle(workBase(b.title))]), isbns: new Set([b.isbn].filter(Boolean)), info: { ...volInfo(null), month: (b.publishedAt || '').slice(0, 7) || String(b.year || '') }, book: null });
+      if (!it.book || (b.status === 'done' && it.book.status !== 'done')) it.book = b;
+    }
+    // 刊行の古い順に番号を振る（わからない本は最後）
+    const vols = items.sort((x, y) => (x.info.month || '9999').localeCompare(y.info.month || '9999') || x.title.localeCompare(y.title, 'ja'))
+      .map((it, i) => ({ ...it.info, vol: i + 1, title: it.title, book: it.book }));
+    const done = vols.filter((v) => v.book?.status === 'done').length;
+    const a = author(by.get(k)?.name || o.name);
+    a.series.push({ key: `o:${k}`, base: OTHERS, author: a.name, named: true, others: true, vols, done, total: vols.length,
+      next: vols.find((v) => v.book?.status !== 'done' && !v.upcoming) || null, coming: vols.filter((v) => v.upcoming && !v.book) });
+    a.read += done; a.total += vols.length;
+  }
   const list = [...by.values()];
-  for (const a of list) a.series.sort((x, y) => y.done - x.done || x.base.localeCompare(y.base, 'ja'));
+  for (const a of list) a.series.sort((x, y) => Number(!!x.others) - Number(!!y.others) || y.done - x.done || x.base.localeCompare(y.base, 'ja'));
   return list.sort((x, y) => y.read - x.read || x.name.localeCompare(y.name, 'ja'));
 }
+// 図鑑のカード・バインダーのシリーズ（「そのほかの作品」も含む）
+const zukanSeries = (key) => zukanAuthors().flatMap((a) => a.series).find((d) => d.key === key) || null;
 const readCovers = (vols, n) => vols.filter((v) => v.book?.status === 'done').slice(-n).map((v) => cover(v.book.title, v.book.isbn, 'xs', v.book.coverIsbns || v.book.coverIsbn || [], v.book.author));
 
 // 記録の画面の入口（データのバックアップの上）
@@ -1655,7 +1704,7 @@ function zukanEntry() {
   return `<a class="zukan-entry" href="${zukanHref()}">
     <span class="zukan-entry-art" aria-hidden="true">${peek.length ? peek.join('') : '<span class="cover xs"></span><span class="cover xs"></span><span class="cover xs"></span>'}</span>
     <span class="zukan-entry-main"><span class="zukan-entry-title">読書図鑑</span>
-      <span class="zukan-entry-sub">${authors.length ? `${authors.length}人の著者・${authors.reduce((n, a) => n + a.series.length, 0)}シリーズ` : 'シリーズの本を読むと、ここに集まります'}</span>
+      <span class="zukan-entry-sub">${authors.length ? `${authors.length}人の著者・${authors.reduce((n, a) => n + a.series.filter((x) => !x.others).length, 0)}シリーズ` : '本を読了にすると、ここに集まります'}</span>
       ${total ? `<span class="zukan-entry-count">集めた <b>${read}</b> / ${total}冊</span>${zbar(read, total)}` : ''}</span></a>`;
 }
 
@@ -1707,8 +1756,8 @@ function drawZukan() {
     const n = d.next;
     html = `<a class="back-link" href="${esc(zukanHref(author.name))}">‹ ${esc(author.name)}</a>
       ${pageHead(d.base, `${d.done} / ${d.total}冊`)}
-      <div class="binder-head">${zbar(d.done, d.total)}${d.done === d.total ? '<span class="zcomplete">コンプリート</span>' : ''}</div>
-      ${n ? `<p class="binder-next">次に読む：<b>${esc(volName(d, n))}</b>${n.book ? '（本棚にあり）' : n.upcoming ? `（${esc(releaseDay(n))}発売予定）` : ''}</p>` : '<p class="binder-next"><b>すべて読み終えました</b></p>'}
+      <div class="binder-head">${zbar(d.done, d.total)}${d.done === d.total && !d.others ? '<span class="zcomplete">コンプリート</span>' : ''}</div>
+      ${d.others ? `<p class="binder-next">${d.total > d.done ? `シリーズではない作品です。薄いカードは、まだ読んでいない作品です。` : 'シリーズではない、読み終えた作品です。'}</p>` : n ? `<p class="binder-next">次に読む：<b>${esc(volName(d, n))}</b>${n.book ? '（本棚にあり）' : n.upcoming ? `（${esc(releaseDay(n))}発売予定）` : ''}</p>` : '<p class="binder-next"><b>すべて読み終えました</b></p>'}
       <div class="binder">${pages.map((p, i) => `<section class="binder-page" aria-label="${i + 1}ページ目"><ol class="pockets">${p.map((v) => tradingCard(d, v)).join('')}</ol>${pages.length > 1 ? `<span class="binder-no">${i + 1} / ${pages.length}</span>` : ''}</section>`).join('')}</div>
       <p class="zukan-legend"><span><i class="lg lg-read"></i>読了</span><span><i class="lg lg-unread"></i>まだ読んでいない</span><span><i class="tcard-tag">本棚</i>本棚にある</span></p>
       ${checking}<p class="source">カードをタップすると本の詳細。まだ持っていない本は本棚に登録できます。</p>`;
@@ -1718,19 +1767,19 @@ function drawZukan() {
       <ul class="zseries-list">${author.series.map((x) => `<li><a class="zseries" href="${esc(zukanHref(author.name, x.key))}">
         <span class="zseries-strip" aria-hidden="true">${(x.vols.length > MINI_CARDS ? x.vols.slice(0, MINI_CARDS - 1) : x.vols).map((v) => miniCard(x, v)).join('')}${x.vols.length > MINI_CARDS ? `<span class="zmini zmini-more">+${x.vols.length - MINI_CARDS + 1}</span>` : ''}</span>
         <span class="zseries-main"><span class="zseries-name">${esc(x.base)}</span>
-          <span class="zseries-meta"><span class="zseries-count">読了 <b>${x.done}</b> / ${x.total}冊</span>${x.done === x.total ? '<span class="zcomplete">コンプリート</span>' : ''}</span>${zbar(x.done, x.total)}</span>
+          <span class="zseries-meta"><span class="zseries-count">${x.others && x.done === x.total ? `読了 <b>${x.done}</b>冊` : `読了 <b>${x.done}</b> / ${x.total}冊`}</span>${x.done === x.total && !x.others ? '<span class="zcomplete">コンプリート</span>' : ''}</span>${zbar(x.done, x.total)}</span>
         <span class="zseries-open">バインダーを開く</span></a></li>`).join('')}</ul>${checking}`;
   } else {
     const read = authors.reduce((s, a) => s + a.read, 0);
     const total = authors.reduce((s, a) => s + a.total, 0);
     html = `<a class="back-link" href="#stats">‹ 読書の記録</a>
       ${pageHead('読書図鑑', total ? `${read} / ${total}冊` : '')}
-      <p class="zukan-intro">読んだシリーズを、著者ごとに集めています。薄いカードは、まだ読んでいない本です。</p>
+      <p class="zukan-intro">読んだ本を、著者ごとに集めています。シリーズは、まだ読んでいない巻も薄いカードで並びます。</p>
       ${authors.length ? `<ul class="zfolders">${authors.map((a) => `<li><a class="zfolder" href="${esc(zukanHref(a.name))}">
           <span class="zfolder-cards" aria-hidden="true">${a.series.flatMap((x) => readCovers(x.vols, 3)).slice(0, 3).join('')}</span>
-          <span class="zfolder-face"><span class="zfolder-name">${esc(a.name)}</span><span class="zfolder-meta">${a.series.length}シリーズ</span>
+          <span class="zfolder-face"><span class="zfolder-name">${esc(a.name)}</span><span class="zfolder-meta">${[a.series.filter((x) => !x.others).length ? `${a.series.filter((x) => !x.others).length}シリーズ` : '', a.series.find((x) => x.others) ? '単発作品' : ''].filter(Boolean).join('・')}</span>
             <span class="zfolder-count"><b>${a.read}</b> / ${a.total}冊</span>${zbar(a.read, a.total)}</span></a></li>`).join('')}</ul>`
-      : (zukanLoading ? '' : `<div class="empty"><p class="empty-title">まだ図鑑に入る本がありません</p><p>シリーズの本を読了にすると、その著者のフォルダができて、シリーズのほかの巻が薄いカードで並びます。</p></div>`)}
+      : (zukanLoading ? '' : `<div class="empty"><p class="empty-title">まだ図鑑に入る本がありません</p><p>本を読了にすると、その著者のフォルダができます。シリーズの本は、ほかの巻も薄いカードで並びます。</p></div>`)}
       ${checking}`;
   }
   box.innerHTML = html;
@@ -1750,7 +1799,8 @@ function loadZukanData() {
     counts.set(k, { n: (counts.get(k)?.n || 0) + 1, name: counts.get(k)?.name || b.author });
   }
   const here = normName(zukanPath()?.author || '');
-  const authors = [...counts].filter(([k]) => !authorWorks.has(k) && !authorFailed.has(k))
+  const needs = (k, n) => !authorWorks.has(k) || (n >= ZUKAN_FULL_MIN && !authorWorks.get(k).full);
+  const authors = [...counts].filter(([k, x]) => needs(k, x.n) && !authorFailed.has(k))
     .sort((a, b) => Number(b[0] === here) - Number(a[0] === here) || b[1].n - a[1].n).map(([, x]) => x.name);
   const groups = currentSeries().filter((g) => !g.named && !seriesFetched.has(g.key) && !seriesFailed.has(g.key) && [...g.owned.values()].some((b) => b.status === 'done'));
   if (!authors.length && !groups.length) return null;
@@ -1767,8 +1817,9 @@ function loadZukanData() {
     for (const name of authors) {
       if (!onZukan()) break;
       const k = normName(name);
-      if (!authorWorks.has(k)) {
-        try { authorWorks.set(k, { t: Date.now(), works: seriesWorksOf(await ndl.searchAuthor(name, { priority: 1, keep: false })) }); saveAuthorWorks(); } catch { authorFailed.add(k); }
+      const full = readCountOf(k) >= ZUKAN_FULL_MIN;
+      if (!authorWorks.has(k) || (full && !authorWorks.get(k).full)) {
+        try { authorWorks.set(k, { t: Date.now(), full, works: seriesWorksOf(await ndl.searchAuthor(name, { priority: 1, keep: false }), { full }) }); saveAuthorWorks(); } catch { authorFailed.add(k); }
       }
       state.done += 1; drawZukanSoon();
     }
@@ -2125,14 +2176,14 @@ const actions = {
     const publishedAt=state.details?.publishedAt || state.book.publishedAt;
     if (state.release) addFromRelease(state.release,publishedAt);
     else if (state.zukan) { // 図鑑のカード：シリーズの巻として（名前のあるシリーズは一覧の書名のまま）
-      const d=findSeries(state.zukan.key),v=d?.vols.find(x=>x.vol===state.zukan.vol);
+      const d=zukanSeries(state.zukan.key),v=d?.vols.find(x=>x.vol===state.zukan.vol);
       if (d && v && !v.book) addSeriesVolume(d,v);
     }
     else addFromWork(state.work,{source:'search',publishedAt});
     drawPreviewAction(state);
   },
   'zukan-card': (el) => {
-    const d = findSeries(el.dataset.key);
+    const d = zukanSeries(el.dataset.key);
     const v = d?.vols.find((x) => x.vol === Number(el.dataset.vol));
     if (!v) return;
     if (v.book) { renderSheetBook(v.book.id); return; }

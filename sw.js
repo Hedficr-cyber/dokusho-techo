@@ -1,6 +1,6 @@
 // オフラインでも本棚を開けるように、アプリ本体だけを保存しておく。
 // 通信できるときは常にサーバーに更新を確かめ（no-cache）、だめなときだけ保存分を使う。
-const CACHE = 'dokusho-techo-v29';
+const CACHE = 'dokusho-techo-v30';
 const SHELL = [
   './', './index.html', './css/app.css', './js/app.js', './js/store.js', './js/ndl.js', './js/genres.js',
   './js/book-details.js', './js/reveal.js', './js/series.js', './js/series-catalog.js', './js/sync.js', './js/versions.js', './js/covers.js', './js/authors.js', './js/shelf.js', './js/recommend.js', './js/util.js', './js/scan.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon-512-maskable.png', './icons/mark.svg',

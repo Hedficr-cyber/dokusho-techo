@@ -211,11 +211,16 @@ export async function openBdSummary(isbn, { signal } = {}) {
     const s = (await res.json())?.[0]?.summary;
     if (!s || typeof s.title !== 'string' || !s.title.trim()) return null;
     const str = (v) => (typeof v === 'string' ? v.trim() : '');
-    // 「知念実希人／著」「桃戸ハル／編著」→ 最初の著者の名前だけ
-    const author = str(s.author).split(/[／/,，、]/)[0].replace(/\s*(著|作|文|編|編著|監修|原作|訳|著者)$/, '').replace(/\s+/g, '');
+    // 「知念実希人／著」「桃戸ハル／編著」→ 最初の著者の名前だけ。古い本の「川端,康成,1899-1972」（姓,名,生没年）は「川端康成」
+    const rawAuthor = str(s.author);
+    const nameSplit = rawAuthor.match(/^([^,，／/、\s]+)[,，]([^,，／/、\s\d][^,，／/、\s]*)(?:[,，][\d-]*)?(?=$|[\s／/])/);
+    const author = (nameSplit ? nameSplit[1] + nameSplit[2] : rawAuthor.split(/[／/,，、]/)[0]).replace(/\s*(著|作|文|編|編著|監修|原作|訳|著者)$/, '').replace(/\s+/g, '');
+    // 巻は「12」「第3巻」「上」などだけ。文庫の整理番号（「う-18-01」「ち1-101」）は書名に付けない
+    const vol = str(s.volume).normalize('NFKC');
+    const volume = /^(?:第\s*)?\d{1,3}\s*巻?$|^[上中下](?:巻)?$|^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]$/.test(vol) ? vol : '';
     const pub = str(s.pubdate).replace(/\D/g, '');
     return {
-      title: str(s.title), volume: str(s.volume), author, publisher: str(s.publisher), year: pub.slice(0, 4),
+      title: str(s.title), volume, author, publisher: str(s.publisher), year: pub.slice(0, 4),
       publishedAt: pub.length >= 8 ? `${pub.slice(0, 4)}-${pub.slice(4, 6)}-${pub.slice(6, 8)}` : pub.length >= 6 ? `${pub.slice(0, 4)}-${pub.slice(4, 6)}` : '',
     };
   } catch {

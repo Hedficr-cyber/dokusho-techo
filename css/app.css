@@ -792,3 +792,91 @@ input::-webkit-caps-lock-indicator { width:18px; height:18px; align-self:center;
 .cover-zoom:focus, .cover-zoom:focus-visible { outline:none; }
 .cz-shade { position:absolute; inset:0; background:rgba(14,14,16,.74); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
 .cz-img { position:fixed; display:block; object-fit:cover; border-radius:8px; transform-origin:0 0; box-shadow:0 28px 80px #00000070, 0 6px 18px #00000040; }
+
+/* v0.16 ⑥ 本屋さんモード：バーコードで「本棚に追加」か「持ってるか確認」か */
+.scan-mode { margin:-8px 0 10px; }
+.scan-mode-note { font-size:12px; line-height:1.7; color:var(--ink-2); margin:0 0 14px; }
+.check-verdict { display:inline-flex; align-self:flex-start; margin-bottom:5px; padding:3px 10px; border-radius:11px; font-size:12px; font-weight:700; letter-spacing:.04em; border:1px solid var(--line); color:var(--ink-2); background:var(--surface); }
+.check-done .check-verdict { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+.check-have .check-verdict { border-color:var(--ink); color:var(--ink); }
+.check-new .check-verdict { background:var(--surface-2); border-color:transparent; color:var(--ink); }
+.check-line { font-size:12px; line-height:1.6; color:var(--ink-2); margin-top:2px; }
+.check-row .book-author + .check-line { color:var(--ink); }
+
+/* v0.16 ⑦ 次の1冊くじ：本棚の見出しの右から開き、トレカをめくる */
+.shelf-head { align-items:center; }
+.page-side { display:inline-flex; align-items:center; gap:12px; flex-shrink:0; }
+.kuji-btn { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:6px 14px 6px 11px; border:1px solid var(--line); border-radius:18px; background:var(--surface); color:var(--ink); font:inherit; font-size:12.5px; font-weight:700; white-space:nowrap; cursor:pointer; }
+.kuji-btn svg { width:17px; height:17px; }
+.kuji-lead { font-size:13px; line-height:1.7; color:var(--ink-2); margin:-14px 0 6px; }
+.kuji-lead span { margin-left:6px; font-size:11px; }
+.kuji-stage { position:relative; display:grid; place-items:center; padding:22px 0 18px; perspective:1300px; }
+.kuji-deck { position:absolute; inset:22px 0 18px; display:grid; place-items:center; pointer-events:none; }
+.kuji-deck i { grid-area:1/1; width:min(56vw,210px); aspect-ratio:63/88; border-radius:14px; background:linear-gradient(150deg,#3a3a40,#1c1c1f); border:1px solid #ffffff18; box-shadow:0 6px 18px #00000022; }
+.kuji-deck i:first-child { transform:rotate(-7deg) translate(-10px,4px); opacity:.7; }
+.kuji-deck i:last-child { transform:rotate(5deg) translate(9px,2px); opacity:.85; }
+.kcard { position:relative; width:min(56vw,210px); aspect-ratio:63/88; transform-style:preserve-3d; -webkit-transform-style:preserve-3d; transition:transform .7s cubic-bezier(.2,1.25,.35,1); cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.kcard.flip { transform:rotateY(180deg); }
+.kcard.shuffle { animation:kuji-shuffle .42s ease-in-out; }
+@keyframes kuji-shuffle { 0% { transform:none; } 30% { transform:translateY(-14px) rotate(-5deg); } 65% { transform:translateY(-8px) rotate(4deg); } 100% { transform:none; } }
+.kcard-face { position:absolute; inset:0; border-radius:14px; overflow:hidden; backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+.kcard-back { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#f2f2f4; background:repeating-linear-gradient(135deg,#ffffff07 0 6px,transparent 6px 12px),linear-gradient(150deg,#3d3d44,#1b1b1e); border:1px solid #ffffff22; box-shadow:0 14px 34px #0000003a; }
+.kcard-back::after { content:""; position:absolute; inset:9px; border:1px solid #ffffff2e; border-radius:9px; pointer-events:none; }
+.kcard-mark { display:grid; place-items:center; width:54px; height:54px; border-radius:50%; border:1px solid #ffffff40; }
+.kcard-mark svg { width:26px; height:26px; }
+.kcard-back b { font-size:12px; letter-spacing:.3em; font-weight:600; }
+.kcard-front { transform:rotateY(180deg); display:flex; flex-direction:column; padding:9px 9px 10px; background:var(--surface); border:1px solid var(--line); box-shadow:0 18px 40px #0000002e; }
+.kcard-front .cover { width:100%; height:auto; flex:1 1 auto; min-height:0; border-radius:6px; box-shadow:none; }
+.kcard-front .cover img { object-fit:cover; }
+.kcard-front .spine-t { font-size:14px; -webkit-line-clamp:5; }
+.kcard-no { position:absolute; z-index:2; top:15px; left:15px; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:700; background:var(--ink); color:var(--paper); }
+.kcard-title { margin-top:8px; font-size:12.5px; font-weight:700; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.kuji-result { min-height:150px; text-align:center; }
+.kuji-hint { font-size:12px; color:var(--ink-2); }
+.kuji-result > * { animation:kuji-in .35s ease-out both; }
+@keyframes kuji-in { from { opacity:0; transform:translateY(6px); } }
+.kuji-eyebrow { font-size:11px; font-weight:700; letter-spacing:.2em; color:var(--ink-2); }
+.kuji-title { margin-top:4px; font-size:19px; font-weight:700; line-height:1.45; }
+.kuji-author { margin-top:2px; font-size:13px; color:var(--ink-2); }
+.kuji-why { margin-top:8px; font-size:12px; color:var(--ink-2); }
+.kuji-actions { display:flex; gap:10px; justify-content:center; margin-top:16px; }
+.kuji-actions > * { flex:1; max-width:200px; }
+.kuji-again { margin-top:12px; gap:6px; }
+.kuji-again svg { width:17px; height:17px; }
+@media (prefers-reduced-motion:reduce) { .kcard { transition:none; } .kcard.shuffle { animation:none; } .kuji-result > * { animation:none; } }
+
+/* v0.16 ⑧ 図鑑のトロフィー：獲得したメダルは金・銀・銅・プラチナ、まだのものは薄く */
+.medal { display:grid; place-items:center; width:44px; height:44px; border-radius:50%; flex-shrink:0; box-shadow:inset 0 1px 0 #ffffff99, inset 0 -2px 4px #00000026, 0 2px 6px #00000024; }
+.medal svg { width:23px; height:23px; }
+.medal-bronze { background:linear-gradient(140deg,#efc49d,#b07a4f 55%,#e2ad82); color:#4a2a12; }
+.medal-silver { background:linear-gradient(140deg,#f7f7f9,#a9a9b2 55%,#e8e8ec); color:#36363c; }
+.medal-gold { background:linear-gradient(140deg,#fbe6a2,#c9a043 55%,#f2d27c); color:#4a3608; }
+.medal-platinum { background:linear-gradient(140deg,#f3f8fb,#9fb5c4 50%,#e6eef3); color:#2d3a44; }
+.medal-locked { background:var(--surface-2); color:var(--ink-2); box-shadow:none; opacity:.55; }
+.trophy-strip { display:flex; flex-direction:column; gap:12px; width:100%; margin:0 0 26px; padding:16px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.trophy-strip-head { display:flex; align-items:baseline; justify-content:space-between; }
+.trophy-strip-title { font-size:15px; font-weight:700; }
+.trophy-strip-count { font-size:12px; color:var(--ink-2); }
+.trophy-strip-count b { font-size:17px; color:var(--ink); }
+.trophy-strip-row { display:flex; gap:10px; overflow-x:auto; scrollbar-width:none; margin:0 -4px; padding:4px; }
+.trophy-strip-row::-webkit-scrollbar { display:none; }
+.trophy-mini { position:relative; flex:0 0 74px; display:flex; flex-direction:column; align-items:center; gap:5px; }
+.trophy-mini-name { max-width:100%; font-size:10px; line-height:1.3; text-align:center; color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trophy-mini.new::after { content:"NEW"; position:absolute; top:-4px; right:2px; padding:1px 4px; border-radius:6px; font-size:8px; font-weight:800; background:var(--ink); color:var(--paper); }
+.trophy-empty { font-size:12px; color:var(--ink-2); }
+.trophy-strip-next { font-size:12px; color:var(--ink-2); }
+.trophy-lead { display:flex; flex-direction:column; gap:8px; margin:-12px 0 6px; font-size:12px; color:var(--ink-2); }
+.trophy-lead b { font-size:20px; color:var(--ink); }
+.trophy-group h3 { margin:24px 0 10px; font-size:14px; font-weight:700; }
+.trophy-grid { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.trophy { position:relative; display:flex; flex-direction:column; align-items:center; gap:4px; padding:14px 10px 12px; border:1px solid var(--line); border-radius:16px; background:var(--surface); text-align:center; }
+.trophy .medal { width:52px; height:52px; margin-bottom:4px; }
+.trophy .medal svg { width:27px; height:27px; }
+.trophy-name { font-size:13px; font-weight:700; }
+.trophy-hint { font-size:10.5px; line-height:1.5; color:var(--ink-2); }
+.trophy-when { margin-top:2px; font-size:11px; font-weight:600; color:var(--ink); }
+.trophy.off .trophy-name, .trophy.off .trophy-when { color:var(--ink-2); }
+.trophy.off .trophy-when { font-weight:500; }
+.trophy .zbar { width:72%; margin-top:4px; }
+.trophy-new { position:absolute; top:8px; right:8px; padding:1px 6px; border-radius:7px; font-size:9px; font-weight:800; background:var(--ink); color:var(--paper); }
+.trophy.new { border-color:var(--ink); }

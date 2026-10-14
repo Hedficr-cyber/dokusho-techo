@@ -12,7 +12,8 @@ import {
 
 import { loadBookDetails, peekBookDetails, prefetchBookDetails, bookDetailsKey, subscribeBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
-import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo } from './series.js';
+import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo, splitVolume } from './series.js';
+import { TROPHIES, TROPHY_GROUPS, trophyProgress } from './trophies.js';
 import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
@@ -206,8 +207,12 @@ const ICONS = {
  arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
  bookmark: '<path d="M7 4h10v16l-5-3-5 3z"/>',
  book: '<path d="M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H4zM13 7a3 3 0 0 1 3-3h4v14h-3a4 4 0 0 0-4 3"/>',
+ cards: '<rect x="9" y="3.5" width="11" height="15" rx="2"/><path d="m9 6.6-3.6 1a2 2 0 0 0-1.4 2.4l2.4 9a2 2 0 0 0 2.4 1.4l5.6-1.5"/>',
+ trophy: '<path d="M8 4h8v5.5a4 4 0 0 1-8 0z"/><path d="M8 6.5H5.2a3 3 0 0 0 3.1 4M16 6.5h2.8a3 3 0 0 1-3.1 4M12 13.5V17M8.5 20.5h7M9.5 17h5v3.5h-5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
+// 本棚の見出し：右に冊数と「次の1冊」（くじ）
+const shelfHead = (n) => `<div class="page-head shelf-head"><h1>本棚</h1><span class="page-side"><span class="page-detail">${n}冊</span><button type="button" class="kuji-btn" data-act="kuji">${icon('cards')}<span>次の1冊</span></button></span></div>`;
 const pageHead = (title, detail = '') => `<div class="page-head"><h1>${esc(title)}</h1>${detail ? `<span class="page-detail">${esc(detail)}</span>` : ''}</div>`;
 
 // ---------------------------------------------------------------- 小さな部品
@@ -356,7 +361,7 @@ function renderShelf() {
   // 本棚の本があるジャンルだけ並べる（v0.15 でジャンルを 12 に増やしたので、空のジャンルで埋めない）
   const genreButtons=[['','すべて'],...GENRE_GROUPS.filter(g=>g.id===ui.genre || all.some(b=>belongsToGenre(b,g.id))).map(g=>[g.id,g.name]),...(ui.genre && !GENRE_GROUP_BY_ID[ui.genre] ? [[ui.genre,genreLabel]] : [])];
   view.innerHTML=`<section class="shelf shelf-sort-${ui.sort}">
-    ${pageHead('本棚',`${all.length}冊`)}
+    ${shelfHead(all.length)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id,label])=>`<button type="button" class="shelf-mode ${ui.sort===id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort===id}">${label}</button>`).join('')}
     </div>
@@ -487,7 +492,7 @@ function drawSeries() {
 
 function renderSeriesShelf() {
   view.innerHTML = `<section class="shelf shelf-sort-series">
-    ${pageHead('本棚', `${store.books().filter(b=>b.status!=='done').length}冊`)}
+    ${shelfHead(store.books().filter(b=>b.status!=='done').length)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
     </div>
@@ -910,6 +915,11 @@ function previewRelease(raw) {
 }
 
 // ---------------------------------------------------------------- バーコードで追加
+// 読み取った本を本棚に入れるか、本屋さんモード（入れずに持っているかを確かめる）か。最後に選んだ方をこの端末で覚える
+const SCAN_NOTE = {
+  add: '読み取った本は、読みたい本として本棚に入ります。',
+  check: '本屋さんモード：本棚には入れずに、持っているか・読んだか・シリーズの何巻目かを確かめます。',
+};
 function renderSheetScan() {
   stopBookPreview();
   flushMemo();
@@ -918,8 +928,11 @@ function renderSheetScan() {
   scanController = controller;
   openId = null;
   scanned = [];
+  const check = ui.scanMode === 'check';
   sheetBody.innerHTML = `
-    <h2 class="sheet-title">バーコードで追加</h2>
+    <h2 class="sheet-title">バーコード</h2>
+    <div class="seg scan-mode" role="group" aria-label="読み取った本を">${[['add', '本棚に追加'], ['check', '持ってるか確認']].map(([v, l]) => `<button type="button" class="seg-btn ${(check ? 'check' : 'add') === v ? 'on' : ''}" data-act="scan-mode" data-v="${v}" aria-pressed="${(check ? 'check' : 'add') === v}">${l}</button>`).join('')}</div>
+    <p class="scan-mode-note">${SCAN_NOTE[check ? 'check' : 'add']}</p>
     <div class="scan-box">
       <video id="scan-video" playsinline muted autoplay></video>
       <div class="scan-guide" aria-hidden="true"></div>
@@ -927,7 +940,7 @@ function renderSheetScan() {
     <p id="scan-msg" class="scan-msg">カメラを起動しています…</p>
     <form id="isbn-form" class="search-bar" autocomplete="off">
       <input id="isbn-input" inputmode="numeric" placeholder="ISBNを手入力（978から始まる13桁）" enterkeyhint="done">
-      <button type="submit" class="primary">追加</button>
+      <button type="submit" class="primary">${check ? '確認' : '追加'}</button>
     </form>
     <h3 class="sub">読み取った本 <span class="muted" id="scan-count">0冊</span></h3>
     <ul class="books" id="scan-list"></ul>`;
@@ -950,8 +963,9 @@ function renderSheetScan() {
 function drawScanned() {
   const list = $('#scan-list');
   if (!list) return;
-  $('#scan-count').textContent = `${scanned.filter((s) => s.state === 'added').length}冊`;
+  $('#scan-count').textContent = `${scanned.filter((s) => (s.check ? s.state !== 'undone' : s.state === 'added')).length}冊`;
   list.innerHTML = scanned.map((s) => {
+    if (s.check && s.state !== 'added' && s.state !== 'undone') return checkRow(s);
     const b = s.bookId ? store.get(s.bookId) : null;
     let right = '';
     let sub = '';
@@ -982,6 +996,7 @@ function drawScanned() {
 async function handleIsbn(isbn) {
   if (scanned.some((s) => s.isbn === isbn && !['undone', 'error'].includes(s.state))) return;
   navigator.vibrate?.(40);
+  if (ui.scanMode === 'check') { checkIsbn(isbn); return; }
   const owned = store.books().find((b) => (b.isbn || '').replace(/-/g, '') === isbn);
   const status = 'want'; // 読み取った本はすべて本棚へ（読了などは本の詳細で変える）
   const session = scanController;
@@ -1028,6 +1043,100 @@ async function handleIsbn(isbn) {
     entry.msg = e.message;
   }
   drawScanned();
+}
+
+// ---------------------------------------------------------------- 本屋さんモード（v0.16 本人の⑥：本屋でバーコードを読むと、本棚に入れずに「持ってるか」を確かめる）
+// 持っている（同じ ISBN・別の版・シリーズの同じ巻）→ 読了済み／読書中／本棚にある。持っていない → シリーズの何巻目か・前の巻を読んだか
+const cleanIsbn = (s) => String(s || '').replace(/-/g, '');
+const ownsIsbn = (b, isbn) => cleanIsbn(b.isbn) === isbn || cleanIsbn(b.coverIsbn) === isbn || (b.coverIsbns || []).map(cleanIsbn).includes(isbn);
+async function checkIsbn(isbn) {
+  const session = scanController;
+  const entry = { isbn, check: true, state: 'loading' };
+  scanned = [entry, ...scanned.filter((s) => s.isbn !== isbn)];
+  const direct = store.books().find((b) => ownsIsbn(b, isbn));
+  if (direct) { Object.assign(entry, { state: 'owned', bookId: direct.id }); drawScanned(); return; }
+  drawScanned();
+  try {
+    let title = '', author = '', work = null, extra = {};
+    const quick = await ndl.openBdSummary(isbn, { signal: session?.signal });
+    if (session?.signal.aborted || session !== scanController) return;
+    if (quick) {
+      title = quick.title + (quick.volume && !quick.title.includes(quick.volume) ? ` ${quick.volume}` : '');
+      author = quick.author;
+      extra = { publisher: quick.publisher, year: quick.year, publishedAt: quick.publishedAt };
+    } else {
+      work = await ndl.searchIsbn(isbn);
+      if (session?.signal.aborted || session !== scanController) return;
+      if (work) { title = work.main + (work.volume ? ` ${work.volume}` : ''); author = work.authorLabel.split('、')[0] || ''; extra = { publisher: work.latest?.publisher || '', year: work.firstYear ? String(work.firstYear) : '' }; }
+    }
+    if (!title) { entry.state = 'notfound'; drawScanned(); return; }
+    Object.assign(entry, { title, author, extra });
+    const same = store.books().find((b) => normName(b.author) === normName(author) && (normTitle(b.title) === normTitle(title) || normTitle(mainTitle(b.title)) === normTitle(mainTitle(title))))
+      || (work && shelfIndex()(work));
+    const hint = scanSeriesHint({ title, author, isbn });
+    if (same || hint.owned) Object.assign(entry, { state: 'owned', bookId: (same || hint.owned).id, otherEdition: true });
+    else Object.assign(entry, { state: 'new', hint });
+  } catch (e) {
+    Object.assign(entry, { state: 'error', msg: e.message });
+  }
+  drawScanned();
+}
+
+// 読み取った本がシリーズのどの巻か。本棚の本と同じシリーズにまとまるかで確かめる（図鑑・本棚のシリーズと同じ決め方）
+function scanSeriesHint({ title, author, isbn }) {
+  const probe = { id: '__scan__', title, author, isbn, status: 'scan' };
+  const withProbe = shelfSeries([...store.books(), probe], { stories: seriesStories() });
+  const g = withProbe.find((x) => (x.named ? x.members.some((m) => m.book === probe) : [...x.owned.values()].includes(probe)));
+  const readByAuthor = store.books().filter((b) => b.status === 'done' && normName(b.author) === normName(author)).length;
+  if (!g) return { readByAuthor };
+  // 本棚にこのシリーズの本がないときは、名前のあるシリーズ（組み込みの一覧・国会図書館のシリーズ名）だけ何作目かを出す
+  const mine = currentSeries().find((x) => x.key === g.key);
+  if (!mine && !g.named) return { readByAuthor };
+  const d = describeSeries(mine || g, fetchedFor(mine || g));
+  const t = normTitle(title), m = normTitle(mainTitle(title));
+  const sv = splitVolume(title).vol || 1;
+  const sameTitle = (x) => [normTitle(x.title), normTitle(mainTitle(x.title))].some((k) => k.length >= 2 && (k === t || k === m || (k.length >= 4 && (t.endsWith(k) || t.startsWith(k)))));
+  const v = mine
+    ? d.vols.find((x) => (x.isbn && cleanIsbn(x.isbn) === isbn) || (x.coverIsbns || []).map(cleanIsbn).includes(isbn)) || d.vols.find((x) => (d.named ? sameTitle(x) : x.vol === sv))
+    : d.vols.find((x) => x.book === probe);
+  if (v?.book && v.book !== probe) return { readByAuthor, owned: v.book }; // 別の版で同じ巻を持っている
+  // 巻数のシリーズで、国会図書館で確かめる前（本棚にない巻は分からない）でも、書名の巻数で何巻目かを出す
+  const vol = v?.vol || (d.named ? 0 : sv);
+  const before = vol ? d.vols.filter((x) => x.vol < vol && !(x.upcoming && !x.book)) : [];
+  return { readByAuthor, d, series: d.base, named: d.named, vol, done: mine ? d.done : 0, unreadBefore: before.filter((x) => x.book?.status !== 'done') };
+}
+
+function checkRow(s) {
+  const b = s.bookId ? store.get(s.bookId) : null;
+  const title = b?.title || s.title || `ISBN ${s.isbn}`;
+  let verdict = '', tone = 'wait', right = '';
+  const lines = [];
+  if (s.state === 'owned' && b) {
+    tone = b.status === 'done' ? 'done' : 'have';
+    verdict = b.status === 'done' ? '読了済み' : b.status === 'reading' ? '読書中' : '本棚にある';
+    if (b.status === 'done') lines.push(b.finishedAt ? `${monthLabel(b.finishedAt.slice(0, 7))}に読了` : '読み終えた本です');
+    if (b.status === 'want') lines.push('読みたい本として本棚にあります');
+    if (s.otherEdition) lines.push('別の版を持っています');
+  } else if (s.state === 'new') {
+    tone = 'new';
+    verdict = '持っていない';
+    const h = s.hint || {};
+    if (h.series) {
+      const where = h.vol ? `の${h.named ? `${h.vol}作目` : `${h.vol}巻`}` : '';
+      lines.push(`「${h.series}」${where}`);
+      if (!h.done) lines.push('このシリーズはまだ読んでいません');
+      else if (!h.vol) lines.push(`このシリーズは${h.done}冊読了`);
+      else if (h.unreadBefore.length) lines.push(`前の巻でまだ読んでいない：${h.unreadBefore.slice(0, 2).map((x) => volName(h.d, x)).join('・')}${h.unreadBefore.length > 2 ? ` ほか${h.unreadBefore.length - 2}冊` : ''}`);
+      else lines.push('前の巻はすべて読了。次に読む巻です');
+    } else if (h.readByAuthor) lines.push(`${s.author}の本は${h.readByAuthor}冊読了`);
+    right = `<button type="button" class="add-btn" data-act="scan-check-add" data-isbn="${esc(s.isbn)}">読みたいに追加</button>`;
+  } else if (s.state === 'notfound') { tone = 'none'; verdict = '見つからない'; lines.push('書誌が見つかりませんでした'); }
+  else if (s.state === 'error') { tone = 'none'; verdict = '確かめられない'; lines.push(s.msg || '通信できませんでした'); }
+  return `<li class="book work check-row check-${tone}">${cover(title, s.isbn)}
+    <div class="book-main">${verdict ? `<span class="check-verdict">${esc(verdict)}</span>` : ''}<div class="book-title">${esc(title)}</div>
+      <div class="book-author">${esc(b?.author || s.author || '')}</div>
+      ${lines.map((l) => `<div class="check-line">${esc(l)}</div>`).join('')}</div>
+    ${right ? `<div class="book-side">${right}</div>` : ''}</li>`;
 }
 
 // openBD で登録した本に、国立国会図書館の書誌（分類・判型・最初の年・NDL のリンク）を裏で足す（画面には何も出さない）
@@ -1839,6 +1948,7 @@ function drawZukan() {
     html = `<a class="back-link" href="#stats">‹ 読書の記録</a>
       ${pageHead('読書図鑑', total ? `${read} / ${total}冊` : '')}
       <p class="zukan-intro">読んだ本を、著者ごとに集めています。シリーズは、まだ読んでいない巻も薄いカードで並びます。</p>
+      ${authors.length ? trophyStrip() : ''}
       ${authors.length ? `<ul class="zfolders">${authors.map((a) => `<li><a class="zfolder" href="${esc(zukanHref(a.name))}">
           <span class="zfolder-cards" aria-hidden="true">${a.series.flatMap((x) => readCovers(x.vols, 3)).slice(0, 3).join('')}</span>
           <span class="zfolder-face"><span class="zfolder-name">${esc(a.name)}</span><span class="zfolder-meta">${[a.series.filter((x) => !x.others).length ? `${a.series.filter((x) => !x.others).length}シリーズ` : '', a.series.find((x) => x.others) ? '単発作品' : ''].filter(Boolean).join('・')}</span>
@@ -1889,6 +1999,147 @@ function loadZukanData() {
     }
   })().finally(() => { zukanRun = null; if (zukanLoading === state) zukanLoading = null; drawZukan(); });
   return zukanRun;
+}
+
+// ---------------------------------------------------------------- 次の1冊くじ（v0.16 本人の⑦：読む本に迷ったら、カードを 1 枚引く）
+// カード：図鑑のシリーズの続きの巻（読んだ巻のあるシリーズの、次に読む発売済みの巻）と、本棚の読みたい本（発売前の本は除く）
+let kuji = null; // { cands, drawn, pick, busy }
+function kujiCandidates() {
+  const list = [];
+  const taken = new Set();
+  for (const s of currentSeries()) {
+    const d = describeSeries(s, fetchedFor(s));
+    const n = d.next;
+    if (!isRealSeries(d) || !d.done || !n || (n.upcoming && !n.book)) continue;
+    if (n.book) { if (n.book.status === 'want') { list.push({ key: n.book.id, book: n.book, d, v: n }); taken.add(n.book.id); } continue; }
+    if (n.work || d.named) list.push({ key: `${d.key}#${n.vol}`, book: null, d, v: n });
+  }
+  for (const b of store.books()) {
+    if (b.status !== 'want' || taken.has(b.id)) continue;
+    if ((b.publishedAt || '').length === 10 && b.publishedAt > today()) continue;
+    list.push({ key: b.id, book: b });
+  }
+  return list;
+}
+function renderKuji() {
+  stopBookPreview(); flushMemo(); stopScanning(); openId = null;
+  const cands = kujiCandidates();
+  kuji = { cands, drawn: new Set(), pick: null, busy: false };
+  sheetBody.innerHTML = `<h2 class="sheet-title">次の1冊</h2>
+    ${cands.length ? `<p class="kuji-lead">読みたい本と、図鑑のシリーズの続きから1枚引きます。<span>全${cands.length}枚</span></p>
+      <div class="kuji-stage">
+        <span class="kuji-deck" aria-hidden="true"><i></i><i></i></span>
+        <div class="kcard" id="kcard" role="button" tabindex="0" data-act="kuji-draw" aria-label="カードを引く">
+          <span class="kcard-face kcard-back" aria-hidden="true"><span class="kcard-mark">${icon('book')}</span><b>読書手帖</b></span>
+          <span class="kcard-face kcard-front" id="kcard-front"></span>
+        </div>
+      </div>
+      <div class="kuji-result" id="kuji-result" aria-live="polite"><p class="kuji-hint">カードをタップして引く</p></div>`
+    : `<div class="empty"><p class="empty-title">引けるカードがありません</p><p>読みたい本を本棚に入れるか、シリーズの本を読了にすると、続きの巻がカードになります。</p></div>`}`;
+  showSheet();
+  sheetBody.scrollTop = 0;
+}
+function drawKuji() {
+  const k = kuji;
+  const card = $('#kcard');
+  if (!k || k.busy || !k.cands.length || !card) return;
+  k.busy = true;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wasOpen = card.classList.contains('flip');
+  card.classList.remove('flip');
+  $('#kuji-result').innerHTML = '';
+  const alive = () => kuji === k && card.isConnected;
+  setTimeout(() => {
+    if (!alive()) return;
+    // 引いたカードは、全部引き終えるまで出さない
+    let pool = k.cands.filter((c) => !k.drawn.has(c.key));
+    if (!pool.length) { k.drawn.clear(); pool = k.cands.filter((c) => c.key !== k.pick?.key); if (!pool.length) pool = k.cands; }
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    k.pick = pick; k.drawn.add(pick.key);
+    $('#kcard-front').innerHTML = kujiFront(pick);
+    card.classList.add('shuffle');
+    setTimeout(() => {
+      if (!alive()) return;
+      card.classList.remove('shuffle');
+      card.classList.add('flip');
+      card.setAttribute('aria-label', 'もう1枚引く');
+      navigator.vibrate?.(25);
+      setTimeout(() => { if (!alive()) return; k.busy = false; showKujiResult(); }, still ? 0 : 700);
+    }, still ? 0 : 420);
+  }, wasOpen && !still ? 420 : 0);
+}
+function kujiFront(c) {
+  const b = c.book;
+  const title = mainTitle(b ? b.title : c.v.title);
+  const cv = b ? cover(b.title, b.isbn, 'card', b.coverIsbns || b.coverIsbn || [], b.author) : cover(c.v.title, c.v.isbn, 'card', c.v.coverIsbns || [], c.d.author);
+  const no = c.d ? (c.d.named ? `No.${c.v.vol}` : `${c.v.vol}巻`) : '読みたい本';
+  return `<span class="kcard-no">${esc(no)}</span>${cv}<span class="kcard-title">${esc(title)}</span>`;
+}
+function showKujiResult() {
+  const c = kuji?.pick;
+  const box = $('#kuji-result');
+  if (!c || !box) return;
+  const b = c.book ? store.get(c.book.id) : null;
+  const title = b ? b.title : c.d.named ? mainTitle(c.v.title) : c.v.title;
+  const author = b?.author || c.d?.author || '';
+  const why = c.d ? `「${c.d.base}」の続き（${volName(c.d, c.v)}）${b ? '・本棚にあり' : '・まだ持っていない'}`
+    : `本棚の読みたい本${/^\d{4}-\d{2}/.test(b?.addedAt || '') ? `・${monthLabel(b.addedAt.slice(0, 7))}に登録` : ''}`;
+  box.innerHTML = `<p class="kuji-eyebrow">次はこれ！</p><h3 class="kuji-title">${esc(title)}</h3><p class="kuji-author">${esc(author)}</p><p class="kuji-why">${esc(why)}</p>
+    <div class="kuji-actions">${b ? `<button type="button" class="primary" data-act="kuji-read" data-id="${esc(b.id)}">この本を読む</button><button type="button" class="ghost" data-act="open" data-id="${esc(b.id)}">詳細を見る</button>`
+      : '<button type="button" class="primary" data-act="kuji-add">読みたいに追加</button>'}</div>
+    <button type="button" class="ghost kuji-again" data-act="kuji-draw">${icon('cards')}もう1枚引く</button>`;
+}
+
+// ---------------------------------------------------------------- 図鑑のトロフィー（v0.16 本人の⑧：実績を集める）
+// 数え方は js/trophies.js。獲得した分はこの端末だけで覚え、新しく獲得したものに NEW を付ける（トロフィーの一覧を開くと消える）
+const trophyList = () => trophyProgress(store.books(), zukanAuthors().flatMap((a) => a.series).filter((d) => !d.others));
+const TROPHY_ORDER = new Map(TROPHIES.map((t, i) => [t.id, i]));
+const TIER_RANK = { bronze: 1, silver: 2, gold: 3, platinum: 4 };
+const medal = (t) => `<span class="medal medal-${t.earned ? t.tier : 'locked'}" aria-hidden="true">${icon('trophy')}</span>`;
+const trophyWhen = (t) => (t.at ? `${monthLabel(t.at.slice(0, 7))}に達成` : '達成');
+const trophyLeft = (t) => `あと${Math.max(1, t.goal - t.value)}${t.unit}`;
+// 最初の 1 回は、いま獲得している分を覚えるだけ（印を付けない）。戻り値：新しく獲得したトロフィー
+function noteTrophies(list = trophyList()) {
+  const got = list.filter((t) => t.earned).map((t) => t.id);
+  if (!Array.isArray(ui.trophiesKnown)) { ui.trophiesKnown = got; ui.trophiesNew = []; saveUi(); return []; }
+  const known = new Set(ui.trophiesKnown);
+  const fresh = list.filter((t) => t.earned && !known.has(t.id));
+  if (fresh.length || got.length !== known.size || got.some((id) => !known.has(id))) {
+    ui.trophiesKnown = got;
+    ui.trophiesNew = [...new Set([...(ui.trophiesNew || []), ...fresh.map((t) => t.id)])].filter((id) => got.includes(id));
+    saveUi();
+  }
+  return fresh;
+}
+const wonText = (won) => `トロフィー「${won.map((t) => t.name).join('」「')}」を獲得！`;
+// 図鑑の最初のページ：獲得したトロフィー（新しい順）と、次に近いトロフィー
+function trophyStrip() {
+  const list = trophyList();
+  noteTrophies(list);
+  const fresh = new Set(ui.trophiesNew || []);
+  const got = list.filter((t) => t.earned).sort((a, b) => Number(fresh.has(b.id)) - Number(fresh.has(a.id)) || (b.at || '').localeCompare(a.at || '') || TIER_RANK[b.tier] - TIER_RANK[a.tier] || TROPHY_ORDER.get(b.id) - TROPHY_ORDER.get(a.id));
+  const near = list.filter((t) => !t.earned).sort((a, b) => b.value / b.goal - a.value / a.goal || a.goal - b.goal)[0];
+  return `<button type="button" class="trophy-strip" data-act="trophies" aria-label="トロフィー ${got.length} / ${list.length}。一覧を開く">
+    <span class="trophy-strip-head"><span class="trophy-strip-title">トロフィー</span><span class="trophy-strip-count"><b>${got.length}</b> / ${list.length}</span></span>
+    <span class="trophy-strip-row">${got.length ? got.slice(0, 8).map((t) => `<span class="trophy-mini${fresh.has(t.id) ? ' new' : ''}">${medal(t)}<span class="trophy-mini-name">${esc(t.name)}</span></span>`).join('') : '<span class="trophy-empty">本を読了にすると、トロフィーが集まります</span>'}</span>
+    ${near ? `<span class="trophy-strip-next">次は「${esc(near.name)}」：${esc(trophyLeft(near))}</span>` : ''}
+  </button>`;
+}
+function renderTrophies() {
+  stopBookPreview(); flushMemo(); stopScanning(); openId = null;
+  const list = trophyList();
+  noteTrophies(list);
+  const fresh = new Set(ui.trophiesNew || []);
+  if (fresh.size) { ui.trophiesNew = []; saveUi(); pendingRender = true; } // 閉じたら図鑑の NEW を消す
+  const got = list.filter((t) => t.earned).length;
+  sheetBody.innerHTML = `<h2 class="sheet-title">トロフィー</h2>
+    <div class="trophy-lead"><span><b>${got}</b> / ${list.length}</span>${zbar(got, list.length)}</div>
+    ${TROPHY_GROUPS.map(([g, name]) => `<section class="trophy-group"><h3>${esc(name)}</h3><ul class="trophy-grid">${list.filter((t) => t.group === g).map((t) => `<li class="trophy ${t.earned ? 'on' : 'off'}${fresh.has(t.id) ? ' new' : ''}">
+      ${medal(t)}<span class="trophy-name">${esc(t.name)}</span>${t.hint ? `<span class="trophy-hint">${esc(t.hint)}</span>` : ''}
+      <span class="trophy-when">${esc(t.earned ? trophyWhen(t) : trophyLeft(t))}</span>${t.earned ? '' : zbar(t.value, t.goal)}${fresh.has(t.id) ? '<span class="trophy-new">NEW</span>' : ''}</li>`).join('')}</ul></section>`).join('')}
+    <p class="source">読了日と、読書図鑑のシリーズから数えています。シリーズの制覇は、図鑑で「コンプリート」になったシリーズです。</p>`;
+  showSheet();
+  sheetBody.scrollTop = 0;
 }
 
 function renderVersionHistory() {
@@ -2211,7 +2462,8 @@ const actions = {
     const btn=[...document.querySelectorAll('[data-act="series-vol"]')].find(e=>e.dataset.key===key && Number(e.dataset.vol)===vol);
     btn?.focus({preventScroll:true});
     const name=volName(d,v);
-    toast(store.get(b.id)?.status==='done' ? `${name}を読了にしました` : `${name}の読了を取り消しました`);
+    const won=noteTrophies();
+    toast(store.get(b.id)?.status==='done' ? `${name}を読了にしました${won.length ? `。${wonText(won)}` : ''}` : `${name}の読了を取り消しました`);
   },
   'series-add': (el) => {
     const d = findSeries(el.dataset.key);
@@ -2262,7 +2514,8 @@ const actions = {
     const was = store.get(openId)?.status;
     store.update(openId, { status: el.dataset.v });
     renderSheetBook(openId);
-    if (el.dataset.v === 'done' && was !== 'done') toast('読了にしました。本棚から外れて、「記録」に残ります');
+    const won = noteTrophies();
+    if (el.dataset.v === 'done' && was !== 'done') toast(won.length ? `読了にしました。${wonText(won)}` : '読了にしました。本棚から外れて、「記録」に残ります');
     if (el.dataset.v !== 'done' && was === 'done') toast('本棚に戻しました');
   },
   'date-open': (el) => {
@@ -2373,6 +2626,43 @@ const actions = {
 
   // バーコード
   'open-scan': () => renderSheetScan(),
+  'scan-mode': (el) => {
+    ui.scanMode = el.dataset.v === 'check' ? 'check' : 'add';
+    saveUi();
+    const check = ui.scanMode === 'check';
+    document.querySelectorAll('[data-act="scan-mode"]').forEach((b) => { const on = b.dataset.v === ui.scanMode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    const note = $('.scan-mode-note');
+    if (note) note.textContent = SCAN_NOTE[ui.scanMode];
+    const submit = $('#isbn-form button[type="submit"]');
+    if (submit) submit.textContent = check ? '確認' : '追加';
+    scanned = [];
+    drawScanned();
+  },
+  'scan-check-add': (el) => {
+    const s = scanned.find((x) => x.isbn === el.dataset.isbn && x.check);
+    if (!s || s.state !== 'new') return;
+    const b = store.add({ title: s.title, author: s.author, status: 'want', priority: 2, source: 'scan', isbn: s.isbn, ...(s.extra || {}) });
+    Object.assign(s, { state: 'added', bookId: b.id });
+    enrichScanned(b.id, s.isbn);
+    drawScanned();
+  },
+  kuji: () => renderKuji(),
+  'kuji-draw': () => drawKuji(),
+  'kuji-add': () => {
+    const c = kuji?.pick;
+    if (!c || c.book || !c.d) return;
+    const b = addSeriesVolume(c.d, c.v, 'want');
+    if (b) { c.book = b; c.key = b.id; showKujiResult(); }
+  },
+  'kuji-read': (el) => {
+    const b = store.get(el.dataset.id);
+    if (!b) return;
+    store.update(b.id, { status: 'reading' });
+    closeSheet();
+    render();
+    toast(`「${mainTitle(b.title)}」を読書中にしました`);
+  },
+  trophies: () => renderTrophies(),
   'scan-undo': (el) => {
     const s = scanned.find((x) => x.isbn === el.dataset.isbn);
     if (s?.bookId) store.remove(s.bookId);
@@ -2624,6 +2914,7 @@ sheet.addEventListener('close', () => {
 store.load();
 window.addEventListener('hashchange', onHash);
 onHash();
+try { noteTrophies(); } catch { /* 数えられなくても動く */ }
 store.fillMissingReadDates(); // v0.15.1：写真から取り込んだ読了の本などに、だいたいの読了日を振る（端末ごとに 1 回。同期でもう一方へ）
 store.syncShelfFollows(authorCounts().map(([a])=>a));
 updateBadge();

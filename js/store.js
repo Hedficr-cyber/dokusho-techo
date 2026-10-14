@@ -319,7 +319,9 @@ function mergeReleases(items) {
     const old = state.releases.find((r) => r.key === it.key);
     if (!old || fresh.includes(it)) continue;
     if (!old.isbn && it.isbn) old.isbn = it.isbn;
-    if (!old.publishedAt && it.publishedAt) old.publishedAt = it.publishedAt;
+    // 発売日・発売月が変わったら新しい方に（延期・前倒し）
+    if (it.publishedAt && it.publishedAt !== old.publishedAt) old.publishedAt = it.publishedAt;
+    if (it.month && it.month !== old.month) old.month = it.month;
     if (!old.series && it.series) old.series = it.series;
     if (it.coverLookupVersion) Object.assign(old,{coverIsbns:it.coverIsbns,coverIsbn:it.coverIsbn,coverCheckedAt:it.coverCheckedAt,coverLookupVersion:it.coverLookupVersion});
     else if (!old.coverIsbn && it.coverIsbn) old.coverIsbn = it.coverIsbn;
@@ -328,10 +330,17 @@ function mergeReleases(items) {
 }
 
 // 新刊チェックの結果を足す。もう知っている本・「表示しない」にした本は足さない。新しく見つかった件数を返す
-export function addReleases(name, items) {
+// window：調べた期間の最初の月。complete（取りこぼしのない結果）なら、その期間にあった本が結果から消えていれば外す
+// （発売中止・別人の本・書誌の直し。端末ごと・開いた時刻ごとに冊数が変わらないように）。
+// 結果が 0 冊のときは外さない（一時的な応答の不具合で、その著者の新刊がまとめて消えたり戻ったりしないように）
+export function addReleases(name, items, { window = '', complete = false } = {}) {
   refreshStoredState();
   if (!isFollowing(name)) return 0;
   const n = mergeReleases(items);
+  if (window && complete && items.length) {
+    const keys = new Set(items.map((r) => r.key));
+    state.releases = state.releases.filter((r) => r.series || normName(r.author) !== normName(name) || keys.has(r.key) || (r.month || '') < window);
+  }
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f) f.lastChecked = new Date().toISOString();
   save('releases'); // 裏の新刊確認。本棚の画面は描き直さない

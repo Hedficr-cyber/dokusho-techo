@@ -662,7 +662,7 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 .zukan .back-link { margin-bottom:0; }
 .zukan .page-head h1 { font-size:clamp(23px,6.6vw,34px); line-height:1.35; overflow-wrap:anywhere; word-break:auto-phrase; }
 .zukan-intro { font-size:13px; color:var(--ink-2); margin:-10px 0 22px; line-height:1.8; }
-.zukan-checking { margin:18px 2px 0; }
+.zukan-checking, .cal-checking { margin:18px 2px 0; }
 /* 著者のフォルダ：奥の板とつまみ、のぞくカード、手前の面 */
 .zfolders { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 14px; }
 .zfolder { position:relative; display:block; padding-top:30px; color:inherit; }
@@ -734,6 +734,9 @@ button.vol.vol-more { font-size:12px; font-weight:500; color:var(--ink-2); backg
 @media(prefers-color-scheme:dark) { .pocket { background:linear-gradient(160deg,#ffffff14,#ffffff00 42%),var(--surface-2); } .zcomplete { background:linear-gradient(120deg,#e8e8ec,#a9a9b0 48%,#e8e8ec); color:#18181b; } }
 @media(prefers-reduced-motion:reduce) { .tcard { transition:none; } }
 /* 本を追加で読み込む */
+.import-code { display:flex; align-items:flex-end; gap:8px; margin-top:12px; }
+.import-code label { flex:1; min-width:0; }
+.import-code input { width:100%; }
 .merge-summary { list-style:none; margin:14px 0; padding:0; font-size:14px; line-height:2; }
 .merge-list { margin:6px 0; font-size:13px; }
 .merge-list summary { cursor:pointer; min-height:40px; display:flex; align-items:center; }

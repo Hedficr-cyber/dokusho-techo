@@ -207,9 +207,11 @@ export async function searchReleases(name, fromMonth) {
   const items = await query({ creator: name, from: fromMonth, cnt: 60, dpid: null }, { ttl: 6 * 3600 * 1000, priority:0 });
   const own = items.filter((it) => isPrintRecord(it) && (it.creators.some((c) => authorMatches(c, name))
     || (normName(name).length > 2 && normName(respAuthor(it.resp)) === normName(name))));
-  return groupWorks(own)
+  const works = groupWorks(own)
     .filter((w) => w.creators.length <= 3 && w.lastMonth >= fromMonth)
     .sort((a, b) => b.lastMonth.localeCompare(a.lastMonth));
+  works.complete = items.length < 60; // 60 件で打ち切られていなければ、この期間の本はすべて入っている
+  return works;
 }
 
 export async function searchTitle(title, author = '', {allSources=false, ttl=TTL_MS, cnt=40, priority=2}={}) {

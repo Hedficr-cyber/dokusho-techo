@@ -1256,7 +1256,9 @@ function drawCalendar() {
       ${calDayList(weekItems, 'この週の発売', 'この週に発売日が分かっている本はありません。')}
       ${months.map((mo) => undatedList(items, mo)).join('')}`;
   }
-  box.innerHTML = `${switcher}${body}
+  // 著者の新刊を確かめている間は、冊数が増減することがあると分かるように小さく出す
+  const note = checking ? `<p class="muted small cal-checking">著者の新刊を確かめています（${checking.total}人中${checking.done}人）</p>` : '';
+  box.innerHTML = `${switcher}${body}${note}
     <p class="source">フォロー中の著者（本棚の著者）の新刊、本棚のシリーズの新しい巻、本棚に登録した発売予定の本。日付は出版社の近刊情報（国立国会図書館サーチ）です。</p>`;
 }
 
@@ -1295,7 +1297,8 @@ function renderCalendarDay(date) {
 // 著者のページ（著書の名前や本の詳細から開く）。名前で探すのは「検索」タブ
 function renderAuthor(name) {
   const token = ++renderToken;
-  if (!name) { renderAuthorHome(); hydrateReleaseCovers(); return; }
+  // 著書を開いたら、確かめてから時間のたった著者をすべて確かめる（起動時は一部だけ。端末ごとに新刊・カレンダーの冊数がずれないように）
+  if (!name) { renderAuthorHome(); hydrateReleaseCovers().finally(() => { if (route.name === 'author' && !route.arg) checkReleases(staleFollows()); }); return; }
   view.innerHTML = `
     <section>
       <a class="back-link" href="#author">‹ 著書</a>
@@ -1387,7 +1390,7 @@ async function checkReleases(names) {
         if (!store.isFollowing(name)) break;
         try { Object.assign(it,await resolveReleaseCovers(it)); } catch { /* 書誌の新刊確認は続ける */ }
       }
-      found += store.addReleases(name, items);
+      found += store.addReleases(name, items, { window: from, complete: !!works.complete });
     } catch (e) {
       checkError = e.message;
     }
@@ -1574,6 +1577,11 @@ function drawSearchResult() {
 // ---------------------------------------------------------------- 読書の記録：本と読了日を履歴として並べる。
 function renderStats() {
   if (zukanPath()) { renderZukan(); return; }
+  const linkCode = location.hash.match(/^#stats\/import\/([^/?#]+)$/)?.[1];
+  if (linkCode) {
+    history.replaceState(null, '', '#stats');
+    setTimeout(() => importByCode(decodeURIComponent(linkCode)), 0);
+  }
   const all = store.books();
   const done = all.filter((b) => b.status === 'done').sort((a,b) => (b.finishedAt || '').localeCompare(a.finishedAt || ''));
   const years = [...new Set(done.map((b) => (b.finishedAt || '').slice(0,4)).filter(Boolean))].sort().reverse();
@@ -1600,6 +1608,7 @@ function renderStats() {
       <div class="row"><button type="button" class="primary" data-act="export">バックアップを書き出す</button><label class="ghost file-btn">バックアップから戻す<input id="import-file" type="file" accept="application/json,.json"></label></div>
       <p class="muted small">ほかのブラウザのバックアップや本の一覧のファイルを、いまの本棚に足すこともできます（置き換えません）。</p>
       <div class="row"><label class="ghost file-btn">本を追加で読み込む<input id="merge-file" type="file" accept="application/json,.json"></label></div>
+      <form id="import-code-form" class="import-code" autocomplete="off"><label><span class="label">取り込みコードで追加</span><input id="import-code" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="コードを貼り付け"></label><button type="submit" class="ghost small">追加する本を見る</button></form>
       <p class="muted small">更新 ${esc(localTime(store.snapshot().updatedAt))}</p><button type="button" class="link small" data-act="backup-preview">バックアップの内容を確認</button>
     </details><p class="app-footer">読書手帖 <span>${APP_VERSION}</span><button type="button" class="link" data-act="versions">バージョン履歴</button></p>
   </section>`;
@@ -1647,7 +1656,7 @@ function zukanEntry() {
     <span class="zukan-entry-art" aria-hidden="true">${peek.length ? peek.join('') : '<span class="cover xs"></span><span class="cover xs"></span><span class="cover xs"></span>'}</span>
     <span class="zukan-entry-main"><span class="zukan-entry-title">読書図鑑</span>
       <span class="zukan-entry-sub">${authors.length ? `${authors.length}人の著者・${authors.reduce((n, a) => n + a.series.length, 0)}シリーズ` : 'シリーズの本を読むと、ここに集まります'}</span>
-      ${total ? `<span class="zukan-entry-count">集めた <b>${read}</b> / ${total}冊</span>${zbar(read, total)}` : ''}</span>${icon('arrow')}</a>`;
+      ${total ? `<span class="zukan-entry-count">集めた <b>${read}</b> / ${total}冊</span>${zbar(read, total)}` : ''}</span></a>`;
 }
 
 // トレカ 1 枚。読了は濃く、それ以外は薄い（本棚にある・発売予定は小さな印つき）
@@ -1710,7 +1719,7 @@ function drawZukan() {
         <span class="zseries-strip" aria-hidden="true">${(x.vols.length > MINI_CARDS ? x.vols.slice(0, MINI_CARDS - 1) : x.vols).map((v) => miniCard(x, v)).join('')}${x.vols.length > MINI_CARDS ? `<span class="zmini zmini-more">+${x.vols.length - MINI_CARDS + 1}</span>` : ''}</span>
         <span class="zseries-main"><span class="zseries-name">${esc(x.base)}</span>
           <span class="zseries-meta"><span class="zseries-count">読了 <b>${x.done}</b> / ${x.total}冊</span>${x.done === x.total ? '<span class="zcomplete">コンプリート</span>' : ''}</span>${zbar(x.done, x.total)}</span>
-        <span class="zseries-open">バインダーを開く${icon('arrow')}</span></a></li>`).join('')}</ul>${checking}`;
+        <span class="zseries-open">バインダーを開く</span></a></li>`).join('')}</ul>${checking}`;
   } else {
     const read = authors.reduce((s, a) => s + a.read, 0);
     const total = authors.reduce((s, a) => s + a.total, 0);
@@ -1814,23 +1823,48 @@ async function importBackup(file) {
 async function mergeFile(file) {
   try {
     if (file.size>10*1024*1024) throw new Error('大きすぎます');
-    const data = JSON.parse(await file.text());
-    const plan = store.planMerge(data);
-    stopBookPreview(); flushMemo(); stopScanning(); openId=null;
-    const doneAdd = plan.add.filter((b) => b.status === 'done').length;
-    sheetBody.innerHTML = `<h2 class="sheet-title">本を追加で読み込む</h2>
-      <p>「${esc(file.name)}」から、いまの本棚（${store.books().length}冊）に足します。消える本はありません。</p>
-      <ul class="merge-summary"><li>新しく追加 <b>${plan.add.length}</b>冊${doneAdd ? `（うち読了 ${doneAdd}冊）` : ''}</li><li>本棚の本を読了にする <b>${plan.read.length}</b>冊</li><li>すでにある本 <b>${plan.same}</b>冊（そのまま）</li></ul>
-      ${plan.add.length ? `<details class="merge-list"><summary>追加する本を見る</summary><ol>${plan.add.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}${b.status === 'done' ? '・読了' : ''}</span></li>`).join('')}</ol></details>` : ''}
-      ${plan.read.length ? `<details class="merge-list"><summary>読了にする本を見る</summary><ol>${plan.read.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}</span></li>`).join('')}</ol></details>` : ''}
-      <div class="row">${plan.add.length || plan.read.length ? '<button type="button" class="primary" data-act="confirm-merge">追加する</button>' : ''}<button type="button" class="ghost" data-act="close">${plan.add.length || plan.read.length ? 'やめる' : '閉じる'}</button></div>`;
-    mergeFile.pending = data;
-    showSheet(); sheetBody.scrollTop = 0;
+    showMergePlan(JSON.parse(await file.text()), `「${file.name}」`);
   } catch {
     toast('読み込めませんでした。読書手帖のバックアップか本の一覧のファイルを選んでください');
   } finally {
     const input = $('#merge-file'); if (input) input.value = ''; // 同じファイルをもう一度選べるように
   }
+}
+// 取り込みコード「<id>.<鍵>」：公開サイトの data/imports/<id>.json（鍵がないと読めない形）を、この端末で開いて足す。
+// 鍵はコードにだけあり、サイトには置かない（本の一覧を他人に読まれない）。リンク #stats/import/<コード> でも開ける
+const IMPORT_CODE = /^([a-f0-9]{24})\.([A-Za-z0-9_-]{43})$/;
+async function openImportCode(code) {
+  const m = String(code || '').trim().match(IMPORT_CODE);
+  if (!m) throw new Error('コードの形が違います');
+  const res = await fetch(`./data/imports/${m[1]}.json`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error('見つかりません');
+  const env = await res.json();
+  if (env?.kind !== 'dokusho-techo:import' || typeof env.iv !== 'string' || typeof env.data !== 'string') throw new Error('形が違います');
+  const bytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('raw', bytes(m[2]), 'AES-GCM', false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(env.iv), additionalData: new TextEncoder().encode('dokusho-techo:import:v1') }, key, bytes(env.data));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+async function importByCode(code) {
+  try {
+    showMergePlan(await openImportCode(code), '取り込みコードの本');
+  } catch {
+    toast('取り込めませんでした。コードを確かめて、通信できる場所でもう一度試してください');
+  }
+}
+// 追加する前に、何冊増えるか・読了になるか・すでにあるかを見せる（ファイルでもコードでも同じ）
+function showMergePlan(data, source) {
+  const plan = store.planMerge(data);
+  stopBookPreview(); flushMemo(); stopScanning(); openId=null;
+  const doneAdd = plan.add.filter((b) => b.status === 'done').length;
+  sheetBody.innerHTML = `<h2 class="sheet-title">本を追加で読み込む</h2>
+    <p>${esc(source)}を、いまの本棚（${store.books().length}冊）に足します。消える本はありません。</p>
+    <ul class="merge-summary"><li>新しく追加 <b>${plan.add.length}</b>冊${doneAdd ? `（うち読了 ${doneAdd}冊）` : ''}</li><li>本棚の本を読了にする <b>${plan.read.length}</b>冊</li><li>すでにある本 <b>${plan.same}</b>冊（そのまま）</li></ul>
+    ${plan.add.length ? `<details class="merge-list"><summary>追加する本を見る</summary><ol>${plan.add.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}${b.status === 'done' ? '・読了' : ''}</span></li>`).join('')}</ol></details>` : ''}
+    ${plan.read.length ? `<details class="merge-list"><summary>読了にする本を見る</summary><ol>${plan.read.map((b) => `<li>${esc(b.title)}<span class="muted">　${esc(b.author)}</span></li>`).join('')}</ol></details>` : ''}
+    <div class="row">${plan.add.length || plan.read.length ? '<button type="button" class="primary" data-act="confirm-merge">追加する</button>' : ''}<button type="button" class="ghost" data-act="close">${plan.add.length || plan.read.length ? 'やめる' : '閉じる'}</button></div>`;
+  mergeFile.pending = data;
+  showSheet(); sheetBody.scrollTop = 0;
 }
 
 // ---------------------------------------------------------------- PC と iPhone の同期（記録タブ）。仕組みは js/sync.js
@@ -2336,6 +2370,7 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
+  if (e.target.id === 'import-code-form') { e.preventDefault(); importByCode($('#import-code')?.value); return; }
   if (e.target.id === 'sync-form') { e.preventDefault(); submitSync(); return; }
   if (e.target.id === 'sync-unlock') { e.preventDefault(); submitUnlock(); return; }
   if (e.target.id === 'author-form') {

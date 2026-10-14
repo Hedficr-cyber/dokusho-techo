@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <!-- セキュリティ：このアプリが読み込んでよい先を限る（コンテンツセキュリティポリシー）。
-     スクリプトはこのサイトと、バーコード読み取り部品（版とファイルを固定）だけ。外部への通信は国立国会図書館だけ。
+     スクリプトはこのサイトと、バーコード読み取り部品（版とファイルを固定）だけ。外部への通信は国立国会図書館・openBD（本の情報）と、
+     同期をオンにしたときの GitHub API（暗号化した本棚の保存）だけ。
      画像は表紙の配信元だけ。埋め込み・プラグイン・よそへのフォーム送信は使わない。配信元を足すときはここも直す -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://img.hanmoto.com https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://ndlsearch.ndl.go.jp https://api.openbd.jp; media-src 'self' blob: mediastream:; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://img.hanmoto.com https://books.google.com https://*.googleusercontent.com; connect-src 'self' https://ndlsearch.ndl.go.jp https://api.openbd.jp https://api.github.com; media-src 'self' blob: mediastream:; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'">
 <!-- 外部サイトへ、どのページから来たかを伝えない -->
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

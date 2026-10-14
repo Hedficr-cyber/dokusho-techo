@@ -13,6 +13,8 @@ const EMPTY = {
   readLog: {},      // 読んだ日 { 'YYYY-MM-DD': [本の id ...] }
   goals: {},        // 年間目標 { '2026': 50 }
   seriesCheckedAt: '', // 本棚のシリーズの新しい巻を最後に確かめた時刻
+  removed: {},      // 同期用：消した本 { 本の id: 消した時刻 }
+  unfollowed: {},   // 同期用：フォローをやめた著者 { 著者名の比較キー: やめた時刻 }
 };
 let state = structuredClone(EMPTY);
 const listeners = new Set();
@@ -83,6 +85,7 @@ export function add(fields) {
   };
   if (book.status === 'done' && !book.finishedAt) book.finishedAt = today();
   book.updatedAt = today();
+  book.modifiedAt = new Date().toISOString(); // 同期で新しい方を選ぶための時刻
   state.books.unshift(book);
   save();
   return book;
@@ -94,7 +97,7 @@ export function update(id, patch) {
   if (patch.status === 'done' && b.status !== 'done' && !b.finishedAt && !('finishedAt' in patch)) {
     patch.finishedAt = today();
   }
-  Object.assign(b, patch, { updatedAt: today() });
+  Object.assign(b, patch, { updatedAt: today(), modifiedAt: new Date().toISOString() });
   save();
 }
 
@@ -102,6 +105,7 @@ export function remove(id) {
   const i = state.books.findIndex((b) => b.id === id);
   if (i < 0) return;
   if (id.startsWith('seed-')) state.deletedSeedIds.push(id);
+  state.removed[id] = new Date().toISOString(); // 消した印（同期で、ほかの端末からも消す）
   state.books.splice(i, 1);
   save();
 }
@@ -123,12 +127,15 @@ export function prepareBackup(data) {
   const optionalStrings=(obj,keys)=>keys.every(k=>obj[k]==null || typeof obj[k]==='string');
   const optionalNumbers=(obj,keys)=>keys.every(k=>obj[k]==null || (typeof obj[k]==='number' && Number.isFinite(obj[k])));
   const stringArray=(obj,key)=>obj[key]==null || (Array.isArray(obj[key]) && obj[key].every(x=>typeof x==='string'));
-  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading'];
+  const bookStrings=['isbn','publisher','publishedAt','registeredAt','addedAt','updatedAt','modifiedAt','finishedAt','memo','note','format','ndc','ndl','source','coverIsbn','authorReading'];
+  // 同期用の印：{ キー: 時刻の文字列 }
+  const stampMap=(v)=>v==null || (typeof v==='object' && !Array.isArray(v) && Object.values(v).every(x=>typeof x==='string'));
+  if (!stampMap(data.removed) || !stampMap(data.unfollowed)) invalid();
   if (data.books.some(b=>!optionalStrings(b,bookStrings) || !optionalNumbers(b,['rating','priority'])
     || !stringArray(b,'genres') || !stringArray(b,'coverIsbns')
     || (b.photos!=null && (!Array.isArray(b.photos) || b.photos.some(x=>!Number.isInteger(x)))))) invalid();
   if ((data.releases || []).some(r=>!optionalStrings(r,['isbn','publisher','link','ndc','volume','baseTitle','publishedAt','coverIsbn','coverCheckedAt','series']) || !stringArray(r,'coverIsbns'))) invalid();
-  if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt']) || (f.auto!=null && typeof f.auto!=='boolean'))) invalid();
+  if ((data.follows || []).some(f=>!optionalStrings(f,['addedAt','followedAt']) || (f.auto!=null && typeof f.auto!=='boolean'))) invalid();
   const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d;
   if (Object.entries(data.readLog || {}).some(([d, ids]) => !isDate(d) || !Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) invalid();
   if ((data.manualReadDays || []).some((d) => !isDate(d))) invalid();
@@ -137,6 +144,27 @@ export function prepareBackup(data) {
   // v0.2.0 の空配列は「本を指定せずに読んだ日」の印。
   if (!('manualReadDays' in data)) next.manualReadDays = Object.keys(next.readLog).filter((d) => !next.readLog[d].length);
   return next;
+}
+
+// ---------------------------------------------------------------- 同期（js/sync.js）
+// 端末の間でそろえる項目。新刊の一覧・表紙の照合・自動フォローは各端末で作り直すので送らない
+const SYNC_FIELDS = ['books', 'removed', 'deletedSeedIds', 'seedVersion', 'follows', 'unfollowed', 'dismissed', 'hiddenRecs', 'readLog', 'manualReadDays', 'goals'];
+export function syncPayload() {
+  const data = {};
+  for (const k of SYNC_FIELDS) data[k] = structuredClone(state[k]);
+  data.follows = data.follows.filter((f) => !f.auto).map(({ name, addedAt, followedAt }) => ({ name, addedAt: addedAt || '', lastChecked: '', ...(followedAt ? { followedAt } : {}) }));
+  return data;
+}
+// 同期でそろえた内容を当てる（検証してから）。この端末の新刊の一覧・自動フォローの確認時刻は残す
+export function applySync(data) {
+  const next = prepareBackup({ ...syncPayload(), ...data });
+  const keepChecks = new Map(state.follows.map((f) => [normName(f.name), f.lastChecked]));
+  const autos = state.follows.filter((f) => f.auto); // 自動フォローはこの端末の分を残す（本棚に合わせて syncShelfFollows が直す）
+  for (const k of SYNC_FIELDS) state[k] = next[k];
+  const explicit = next.follows.map((f) => ({ ...f, lastChecked: keepChecks.get(normName(f.name)) || '' }));
+  const names = new Set(explicit.map((f) => normName(f.name)));
+  state.follows = [...explicit, ...autos.filter((f) => !names.has(normName(f.name)))];
+  save('sync');
 }
 
 export function replaceAll(data) {
@@ -154,7 +182,8 @@ export function follow(name) {
   const f = state.follows.find((x) => normName(x.name) === normName(name));
   if (f?.auto) { delete f.auto; save(); return; } // 本棚から外れてもフォローを残す
   if (f) return;
-  state.follows.push({ name, addedAt: today(), lastChecked: '' });
+  state.follows.push({ name, addedAt: today(), lastChecked: '', followedAt: new Date().toISOString() });
+  delete state.unfollowed[normName(name)];
   save();
 }
 
@@ -175,6 +204,7 @@ export function syncShelfFollows(names) {
 
 export function unfollow(name) {
   state.follows = state.follows.filter((f) => normName(f.name) !== normName(name));
+  state.unfollowed[normName(name)] = new Date().toISOString();
   // 本棚のシリーズの新しい巻は、フォローをやめても残す
   state.releases = state.releases.filter((r) => normName(r.author) !== normName(name) || r.series);
   save();

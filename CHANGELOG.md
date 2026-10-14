@@ -2,6 +2,17 @@
 
 日付は日本時間。GitHubのコミットとタグでコードの変更箇所を確認できます。
 
+## 0.10.0 — 2026-10-14
+
+- PC と iPhone の同期（js/sync.js、記録タブ）。本人選択の方式：本人の GitHub の非公開リポジトリ（既定 dokusho-techo-data）に 1 ファイル（dokusho-techo.sync.json）として保存。
+  - 暗号：合言葉から PBKDF2-SHA256（60万回・16バイトの salt）で鍵を作り AES-GCM-256（12バイトの IV、付加データ dokusho-techo:sync:v1）。gzip してから暗号化。合言葉は保存せず、鍵は取り出せない CryptoKey として IndexedDB に置く。
+  - GitHub の鍵（fine-grained token、そのリポジトリの Contents 読み書きだけ）は端末の localStorage。公開リポジトリには保存しない（repo.private を確認）。通信先は api.github.com だけ（CSP の connect-src に追加）。
+  - まとめ方：本は modifiedAt（無ければ updatedAt）が新しい方。消した本は removed（消した印）、初期データの削除は deletedSeedIds で、ほかの端末からも消す。自分でフォローした著者は followedAt/unfollowed。おすすめの非表示・新刊の非表示は和集合。新刊の一覧・自動フォロー・表紙の照合は各端末で作り直す（送らない）。
+  - 同期の時：自分で変えて4秒後、開いたとき、戻ってきたとき（前回から60秒以上）、閉じる前（待っている分）、通信が戻ったとき。GitHub の sha が合わなければ読み直してまとめ直す（最大4回）。
+  - 2台目の接続では「クラウドの本棚に置き換える」か「両方を合わせる」を選ぶ。接続前の本棚は端末内に残し、ファイルに書き出せる。
+- 本の追加・変更に modifiedAt、削除に removed、フォローに followedAt／unfollowed を記録（同期の準備）。バックアップの検証にも追加。
+- 検証：_work/sync-qa.cjs（偽の GitHub API で 2 端末・10 項目）。
+
 ## 0.9.0 — 2026-10-14
 
 - 「著者」タブを「著書」に作り直し（本人の指摘：著者検索は検索タブと機能が重なる）。著者の検索欄をなくし、本棚の著者を自動でフォロー（follows に auto:true。本棚から著者の本がなくなれば自動の分だけ外す）。上の切り替えで「新刊」「持っていない本」「カレンダー」。

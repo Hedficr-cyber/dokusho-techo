@@ -552,3 +552,19 @@ body.typing .tabbar { opacity:0; visibility:hidden; pointer-events:none; transfo
 .day-book .row { gap:8px; flex-wrap:wrap; }
 @media(prefers-color-scheme:dark) { .cal-switch { background:rgba(48,48,54,.7); border-color:#ffffff12; } .cal-switch button.on { background:#505057; } .cal-dow.sun, .cal-cell.sun .cal-num, .cal-week-day.sun .cal-week-date { color:#ff9aa2; } }
 .cover.xs .spine { padding:2px; border-left-width:2px; }
+/* 記録：PC と iPhone の同期 */
+.sync-card { margin:28px 0 8px; padding:20px; border:1px solid var(--line); border-radius:20px; background:var(--surface); }
+.sync-card h2 { font-size:17px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.sync-card > p { font-size:13px; line-height:1.85; }
+.sync-on { font-size:11px; font-weight:700; padding:2px 9px; border-radius:10px; background:var(--ink); color:var(--paper); }
+.sync-state { margin:10px 0; font-size:14px; }
+.sync-card .row { gap:8px; flex-wrap:wrap; margin-top:12px; }
+.sync-steps { margin:12px 0; font-size:13px; line-height:1.85; }
+.sync-steps summary { min-height:44px; display:flex; align-items:center; font-weight:600; cursor:pointer; }
+.sync-steps ol { padding-left:1.4em; margin:6px 0 10px; }
+.sync-steps li { margin-bottom:8px; }
+.sync-steps a { text-decoration:underline; text-underline-offset:3px; }
+.sync-form { margin-top:10px; }
+.sync-form input { font-size:16px; } /* iPhone で入力欄を拡大しない */
+.sync-choices { display:grid; gap:6px; margin-top:16px; }
+.sync-choices .muted { margin:0 0 10px; }

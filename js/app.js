@@ -13,6 +13,7 @@ import {
 import { loadBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
 import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries } from './series.js';
+import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
 const $ = (s, el = document) => el.querySelector(s);
@@ -1367,6 +1368,7 @@ function renderStats() {
     ${pageHead('読書の記録', `${done.length}冊を読了`)}
     <div class="history-intro"><p>読み終えた本と、その日の記録。</p>${years.length ? `<div class="shelf-genres history-years" role="group" aria-label="記録する年">${[['all', 'すべて'], ...years.map((y) => [y, `${y}年`])].map(([v, l]) => `<button type="button" class="genre-filter ${ui.historyYear === v ? 'on' : ''}" data-act="history-year" data-v="${esc(v)}" aria-pressed="${ui.historyYear === v}">${esc(l)}</button>`).join('')}</div>` : ''}</div>
     ${rows ? `<ul class="books history-list">${rows}</ul>` : '<div class="empty"><span class="empty-icon">'+icon('book')+'</span><h2>まだ読了の記録がありません</h2><p>本の詳細で「読了」を選ぶと、<br>読み終えた日と一緒にここへ並びます。</p><a href="#shelf" class="primary">本棚を開く</a></div>'}
+    <section id="sync-card" class="sync-card">${syncCard()}</section>
     <details class="backup-panel"><summary><span>データのバックアップ</span><span class="muted">${all.length}冊</span></summary>
       <p>本棚はこのブラウザに保存されています。機種変更の前に、バックアップを書き出しておけます。</p>
       <div class="row"><button type="button" class="primary" data-act="export">バックアップを書き出す</button><label class="ghost file-btn">バックアップから戻す<input id="import-file" type="file" accept="application/json,.json"></label></div>
@@ -1410,6 +1412,136 @@ async function importBackup(file) {
   }
 }
 
+// ---------------------------------------------------------------- PC と iPhone の同期（記録タブ）。仕組みは js/sync.js
+const syncStore = { syncPayload: store.syncPayload, applySync: store.applySync, bookCount: () => store.books().length };
+let syncTimer = 0;
+let syncBusy = '';   // 接続中などの表示
+const guessOwner = () => location.hostname.match(/^([a-z0-9-]+)\.github\.io$/i)?.[1] || '';
+const runSync = () => { clearTimeout(syncTimer); syncTimer = 0; return sync.syncNow({ store: syncStore }); };
+// 本棚を変えたら、少し待ってから同期（続けて変えたときはまとめて 1 回）
+function scheduleSync() {
+  if (!sync.syncConfig()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(runSync, 4000);
+}
+
+function syncCard() {
+  const st = sync.status();
+  if (syncBusy) return `<h2>PCとiPhoneの同期</h2>${loading(syncBusy)}`;
+  if (st.on) {
+    return `<h2>PCとiPhoneの同期 <span class="sync-on">オン</span></h2>
+      <p class="muted small">この端末：${esc(st.device || '')} ・ 保存先：${esc(st.owner)}/${esc(st.repo)}（非公開・暗号化）</p>
+      <p class="sync-state">${st.running ? loading('同期しています…') : st.lastSyncAt ? `最後に同期：${esc(localTime(st.lastSyncAt))}` : 'まだ同期していません'}</p>
+      ${st.lastError ? `<p class="error">${esc(st.lastError)}</p>` : ''}
+      ${st.needPassphrase ? `<form id="sync-unlock" class="add-form" autocomplete="off"><label><span class="label">合言葉</span><input id="sync-pass-again" type="password" autocomplete="current-password" required></label><button type="submit" class="primary">合言葉を入れる</button></form>` : ''}
+      <div class="row"><button type="button" class="primary" data-act="sync-now" ${st.running ? 'disabled' : ''}>今すぐ同期</button><button type="button" class="ghost" data-act="sync-off">この端末の同期をやめる</button></div>
+      ${sync.beforeSyncSnapshot() ? '<button type="button" class="link small" data-act="sync-snapshot">接続する前の本棚をファイルに書き出す</button>' : ''}`;
+  }
+  return `<h2>PCとiPhoneの同期</h2>
+    <p>本棚を、あなたの GitHub の<b>非公開リポジトリ</b>に<b>暗号化して</b>保存し、PC と iPhone でそろえます。合言葉を知らない人（GitHub を含む）には中身が読めません。</p>
+    <details class="sync-steps"><summary>はじめに準備すること（1回だけ）</summary>
+      <ol>
+        <li><a href="https://github.com/new" target="_blank" rel="noopener noreferrer">GitHub で新しいリポジトリを作る</a>：名前は「dokusho-techo-data」、<b>Private</b> を選ぶ。</li>
+        <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">アクセス用の鍵を作る</a>（Fine-grained token）：Repository access は「Only select repositories」で dokusho-techo-data だけ、Permissions の「Contents」を <b>Read and write</b>。期限は1年。できた鍵（github_pat_ で始まる文字）をコピー。</li>
+        <li>下に入れて「接続する」。<b>本棚を整理した端末から先に</b>接続してください。</li>
+        <li>もう1台でも同じ鍵と合言葉で接続し、「クラウドの本棚に置き換える」を選ぶ。</li>
+      </ol>
+      <p class="muted small">合言葉は忘れないでください（忘れるとクラウドのデータは読めません。各端末の本棚は残ります）。鍵はこの端末の中だけに保存し、GitHub 以外には送りません。</p>
+    </details>
+    <form id="sync-form" class="add-form sync-form" autocomplete="off">
+      <label><span class="label">GitHub のユーザー名</span><input id="sync-owner" value="${esc(guessOwner())}" autocapitalize="off" spellcheck="false" required></label>
+      <label><span class="label">リポジトリ名</span><input id="sync-repo" value="dokusho-techo-data" autocapitalize="off" spellcheck="false" required></label>
+      <label><span class="label">アクセス用の鍵</span><input id="sync-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…" required></label>
+      <label><span class="label">合言葉（8文字以上）</span><input id="sync-pass" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label><span class="label">合言葉（確認）</span><input id="sync-pass2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label><span class="label">この端末の名前</span><input id="sync-device" value="${esc(sync.guessDevice())}" maxlength="40"></label>
+      <button type="submit" class="primary">接続する</button>
+    </form>`;
+}
+function drawSyncCard() {
+  const box = $('#sync-card');
+  if (!box) return;
+  if (box.contains(document.activeElement) && document.activeElement.matches('input')) return; // 入力中は描き直さない
+  box.innerHTML = syncCard();
+}
+sync.onSyncStatus(() => drawSyncCard());
+
+// すでにクラウドに本棚があるとき、置き換えるか合わせるかを聞く
+let syncChoice = null;
+function askSyncMode(info) {
+  return new Promise((resolve) => {
+    syncChoice = resolve;
+    stopBookPreview(); flushMemo(); stopScanning(); openId = null;
+    sheetBody.innerHTML = `<h2 class="sheet-title">同期のしかた</h2>
+      <p>GitHub には ${esc(info.device || 'ほかの端末')} で保存した本棚（${info.remoteBooks}冊・${esc(localTime(info.savedAt))}）があります。この端末の本棚は ${info.localBooks}冊です。</p>
+      <div class="sync-choices">
+        <button type="button" class="primary" data-act="sync-choose" data-v="replace">クラウドの本棚に置き換える</button>
+        <p class="muted small">この端末の本棚を、クラウドの内容にそろえます（2台目の端末はこちら）。</p>
+        <button type="button" class="ghost" data-act="sync-choose" data-v="merge">両方を合わせる</button>
+        <p class="muted small">両方の本を残します。同じ本は新しく変えた方、消した本は消したままにします。</p>
+        <button type="button" class="ghost" data-act="sync-choose" data-v="">やめる</button>
+      </div>`;
+    showSheet();
+  });
+}
+function chooseSync(mode) {
+  const done = syncChoice;
+  syncChoice = null;
+  if (sheet.open) closeSheet();
+  done?.(mode || null);
+}
+sheet.addEventListener('close', () => { if (syncChoice) chooseSync(null); });
+
+async function submitSync() {
+  const pass = $('#sync-pass').value;
+  if (pass !== $('#sync-pass2').value) { toast('確認用の合言葉が一致しません'); return; }
+  const input = { owner: $('#sync-owner').value, repo: $('#sync-repo').value, token: $('#sync-token').value, passphrase: pass, device: $('#sync-device').value };
+  document.activeElement?.blur();
+  syncBusy = 'GitHub に接続して、暗号化しています…';
+  drawSyncCard();
+  try {
+    const r = await sync.connect(input, { store: syncStore, choose: askSyncMode });
+    syncBusy = '';
+    if (r.mode === 'cancel') { drawSyncCard(); return; }
+    toast(r.mode === 'first' ? `この端末の本棚（${r.books}冊）を暗号化して保存しました。もう1台でも接続してください` : `同期をオンにしました（${r.books}冊）`);
+  } catch (e) {
+    syncBusy = '';
+    drawSyncCard();
+    toast(e.message || '接続できませんでした');
+    return;
+  }
+  render();
+}
+async function submitUnlock() {
+  const pass = $('#sync-pass-again').value;
+  document.activeElement?.blur();
+  syncBusy = '合言葉を確かめています…';
+  drawSyncCard();
+  try { await sync.unlock(pass, { store: syncStore }); toast('同期を再開しました'); } catch (e) { toast(e.message || '合言葉を確かめられませんでした'); }
+  syncBusy = '';
+  drawSyncCard();
+}
+function exportSnapshot() {
+  const snap = sync.beforeSyncSnapshot();
+  if (!snap) return;
+  const blob = new Blob([JSON.stringify(snap.data, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `読書手帖_同期前の本棚_${snap.at.slice(0, 10)}.json`;
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// 開いたとき・戻ってきたとき・通信が戻ったときに同期。閉じる前に、待っている同期を済ませる
+document.addEventListener('visibilitychange', () => {
+  if (!sync.syncConfig()) return;
+  if (document.visibilityState === 'hidden') { if (syncTimer) runSync(); return; }
+  const last = Date.parse(sync.status().lastSyncAt || '') || 0;
+  if (Date.now() - last > 60 * 1000) runSync();
+});
+window.addEventListener('online', () => { if (sync.syncConfig()) runSync(); });
+
 // ---------------------------------------------------------------- 画面切り替え
 const TITLES = { shelf: '本棚', author: '著書', search: '検索', stats: '読書の記録' };
 
@@ -1447,7 +1579,8 @@ function onHash() {
 // 本棚が変わったとき、入力中でなければ今の画面を描き直す
 store.subscribe((ev) => {
   if (ev.type === 'save-error') { toast('保存できませんでした。端末の空き容量を確認してください'); return; }
-  if (ev.type === 'change') syncShelfAuthors(); // 本が増減したら、本棚の著者のフォローをそろえる
+  if (ev.type === 'change' || ev.type === 'sync') syncShelfAuthors(); // 本が増減したら、本棚の著者のフォローをそろえる
+  if (ev.type === 'change') scheduleSync(); // 自分で変えたときだけ同期する（同期で届いた変更は送り返さない）
   updateBadge();
   // 裏の新刊確認・表紙の補充・自動フォローは、著書の画面だけ描き直す（本棚を見ている最中に一覧を作り直さない）
   if (['release-covers', 'releases', 'follows'].includes(ev.type)) { if (route.name==='author' && !route.arg) renderAuthorHome(); return; }
@@ -1634,6 +1767,15 @@ const actions = {
   },
   'cal-day': (el) => renderCalendarDay(el.dataset.date),
   'unowned-retry': () => { unowned.failed.clear(); drawUnowned(); },
+  'sync-now': () => runSync(),
+  'sync-choose': (el) => chooseSync(el.dataset.v),
+  'sync-snapshot': exportSnapshot,
+  'sync-off': async () => {
+    if (!window.confirm('この端末の同期をやめますか？（GitHub のデータと、ほかの端末の本棚はそのままです）')) return;
+    await sync.disconnect();
+    toast('この端末の同期をやめました');
+    drawSyncCard();
+  },
   'release-dismiss': (el) => store.dismissRelease(el.dataset.key),
 };
 
@@ -1680,6 +1822,8 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('submit', (e) => {
+  if (e.target.id === 'sync-form') { e.preventDefault(); submitSync(); return; }
+  if (e.target.id === 'sync-unlock') { e.preventDefault(); submitUnlock(); return; }
   if (e.target.id === 'author-form') {
     e.preventDefault();
     const name = $('#author-q').value.trim();
@@ -1729,6 +1873,7 @@ store.mergeSeed('data/seed.json').then((n) => {
   if (n && route.name === 'search' && !ui.searchQ) loadRecommendations();
   store.syncShelfFollows(authorCounts().map(([a]) => a)); // 本棚の著者を自動でフォロー
   updateBadge();
+  runSync(); // 同期をオンにしている端末は、開いたときにほかの端末の変更を受け取る
   const stale = staleFollows().slice(0, AUTO_CHECK_LIMIT); // 12 時間たった著者だけ、優先の高い順に調べ直す
   hydrateReleaseCovers().finally(async ()=>{ if (stale.length) await checkReleases(stale); checkSeries(); });
 });

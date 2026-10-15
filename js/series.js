@@ -192,9 +192,13 @@ export function standaloneWorks(works, author, groups = []) {
   const a = normName(author);
   const inStory = new Set(storySeries(works).flatMap((g) => g.works.map((x) => x.work)));
   const bases = new Set(groups.filter((g) => !g.named && normName(g.author) === a).map((g) => normTitle(g.base)));
+  // 書名の頭が同じシリーズ（v0.17）の作品も単発にしない
+  const heads = new Set(groups.filter((g) => g.prefix && normName(g.author) === a).map((g) => normTitle(g.base)));
+  const headOf = (w) => normTitle(plain(mainTitle(w.main || w.title)).normalize('NFKC').split(/[\s　]+/)[0]);
   return (works || []).filter((w) => isNovel(w) && !inStory.has(w)
     && !splitVolume(w.main || w.title, w.volume).vol
     && !bases.has(normTitle(w.main))
+    && !heads.has(headOf(w))
     && !CATALOG.some((e) => catalogAuthor(e, a) && e.vols.some((v) => v.keys.some((k) => w.keys?.includes(k)))));
 }
 
@@ -256,6 +260,39 @@ export function shelfSeries(books, { stories = new Map() } = {}) {
     if (g.named || !n) continue;
     for (const [, b] of [...g.owned].sort((x, y) => x[0] - y[0])) n.members.push({ book: b, pos: 0 });
     groups.delete(key);
+  }
+  // 巻数のシリーズの名前が、名前のあるシリーズの本の書名と同じとき（「invert」が城塚翡翠シリーズにあり、
+  // 「invert 2」だけが巻数で別にまとまった）は、名前のあるシリーズに入れる（v0.17 本人：分かれ方が違う）
+  for (const [key, g] of [...groups]) {
+    if (g.named) continue;
+    const base = normTitle(g.base);
+    const owner = [...groups.values()].find((n) => n.named && normName(n.author) === normName(g.author)
+      && n.members.some((m) => normTitle(mainTitle(m.book.title)) === base));
+    if (!owner) continue;
+    for (const [, b] of [...g.owned].sort((x, y) => x[0] - y[0])) if (!owner.members.some((m) => m.book === b)) owner.members.push({ book: b, pos: 0 });
+    groups.delete(key);
+  }
+  // 書名の頭が同じ本（「怪盗探偵山猫」と「怪盗探偵山猫 虚像のウロボロス」、「ぎんなみ商店街の事件簿 BROTHER編」と「… SISTER編」）：
+  // 巻数も一覧のシリーズ名もないが、同じ著者で、空白の前の書名が同じ（かな・漢字 3 文字以上）で、続きが副題のもの。上・下は 1 作品なのでまとめない
+  const inGroup = new Set(claimed); // どこかのシリーズに入った本（合わせた巻数の本も）は除く
+  for (const g of groups.values()) { for (const b of g.owned.values()) inGroup.add(b.id); for (const m of g.members || []) inGroup.add(m.book.id); }
+  const heads = new Map();
+  for (const b of books) {
+    if (!b.author || inGroup.has(b.id) || b.seriesName === NO_SERIES) continue;
+    const main = plain(mainTitle(b.title)).normalize('NFKC');
+    const [head, ...more] = main.split(/[\s　]+/);
+    const tail = more.join(' ');
+    if ((head.match(/[぀-ヿ㐀-鿿]/g) || []).length < 3 || SPLIT_PART.test(` ${tail}`) && !tail.replace(SPLIT_PART, '').trim()) continue;
+    const k = `${normTitle(head)}|${normName(b.author)}`;
+    if (!heads.has(k)) heads.set(k, { head, books: [] });
+    heads.get(k).books.push(b);
+  }
+  for (const [k, x] of heads) {
+    if (new Set(x.books.map((b) => normTitle(mainTitle(b.title)))).size < 2) continue; // 同じ書名の別の版だけなら 1 作品
+    const key = `n:${k}`;
+    const g = groups.get(key) || { key, base: x.head, author: x.books[0].author, named: true, catalog: null, story: null, prefix: true, manual: false, members: [], owned: new Map() };
+    groups.set(key, g);
+    for (const b of x.books) g.members.push({ book: b, pos: 0 });
   }
   return [...groups.values()];
 }

@@ -13,7 +13,7 @@ import {
 import { loadBookDetails, peekBookDetails, prefetchBookDetails, bookDetailsKey, subscribeBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
 import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo, splitVolume } from './series.js';
-import { TROPHIES, TROPHY_GROUPS, trophyProgress } from './trophies.js';
+import { TIERS, TIER_NAME, TROPHY_GROUPS, trophyProgress, trophyFamilies } from './trophies.js';
 import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
 const APP_VERSION = VERSION_HISTORY[0].version;
@@ -211,8 +211,6 @@ const ICONS = {
  trophy: '<path d="M8 4h8v5.5a4 4 0 0 1-8 0z"/><path d="M8 6.5H5.2a3 3 0 0 0 3.1 4M16 6.5h2.8a3 3 0 0 1-3.1 4M12 13.5V17M8.5 20.5h7M9.5 17h5v3.5h-5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
-// 本棚の見出し：右に冊数と「次の1冊」（くじ）
-const shelfHead = (n) => `<div class="page-head shelf-head"><h1>本棚</h1><span class="page-side"><span class="page-detail">${n}冊</span><button type="button" class="kuji-btn" data-act="kuji">${icon('cards')}<span>次の1冊</span></button></span></div>`;
 const pageHead = (title, detail = '') => `<div class="page-head"><h1>${esc(title)}</h1>${detail ? `<span class="page-detail">${esc(detail)}</span>` : ''}</div>`;
 
 // ---------------------------------------------------------------- 小さな部品
@@ -361,7 +359,7 @@ function renderShelf() {
   // 本棚の本があるジャンルだけ並べる（v0.15 でジャンルを 12 に増やしたので、空のジャンルで埋めない）
   const genreButtons=[['','すべて'],...GENRE_GROUPS.filter(g=>g.id===ui.genre || all.some(b=>belongsToGenre(b,g.id))).map(g=>[g.id,g.name]),...(ui.genre && !GENRE_GROUP_BY_ID[ui.genre] ? [[ui.genre,genreLabel]] : [])];
   view.innerHTML=`<section class="shelf shelf-sort-${ui.sort}">
-    ${shelfHead(all.length)}
+    ${pageHead('本棚',`${all.length}冊`)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id,label])=>`<button type="button" class="shelf-mode ${ui.sort===id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort===id}">${label}</button>`).join('')}
     </div>
@@ -492,7 +490,7 @@ function drawSeries() {
 
 function renderSeriesShelf() {
   view.innerHTML = `<section class="shelf shelf-sort-series">
-    ${shelfHead(store.books().filter(b=>b.status!=='done').length)}
+    ${pageHead('本棚', `${store.books().filter(b=>b.status!=='done').length}冊`)}
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
     </div>
@@ -1660,7 +1658,7 @@ function drawRecommendations() {
   const done = results.filter(Boolean).length;
   const items = pickRecommendations(results, { owned: shelfIndex(), hidden: new Set(store.hiddenRecs()), shelfTitles: shelfTitleMap(store.books()), shift: ui.recShift || 0 });
   box.innerHTML = `<section class="recs" aria-labelledby="recs-title">
-      <div class="recs-head"><h2 id="recs-title">あなたへのおすすめ</h2></div>
+      <div class="recs-head"><h2 id="recs-title">あなたへのおすすめ</h2><button type="button" class="kuji-btn" data-act="kuji">${icon('cards')}<span>次の1冊</span></button></div>
       <p class="recs-taste">${plan.fromPreferences ? '好きなジャンル' : '本棚の傾向'}：${plan.taste.map(esc).join('・')}</p>
 
       ${items.length ? `<ul class="books">${items.map(({ w, reason }) => workRow(w, null, '登録', { reason, hideKey: w.key })).join('')}</ul>`
@@ -2091,13 +2089,15 @@ function showKujiResult() {
 }
 
 // ---------------------------------------------------------------- 図鑑のトロフィー（v0.16 本人の⑧：実績を集める）
-// 数え方は js/trophies.js。獲得した分はこの端末だけで覚え、新しく獲得したものに NEW を付ける（トロフィーの一覧を開くと消える）
+// 数え方は js/trophies.js。v0.17：同じ系統（10冊・30冊…）は 1 枚に重ね、タップで各段の達成日。レア度は 6 段階（最高はレジェンド＝虹色）
+// 獲得した段はこの端末だけで覚え、新しく獲得したものに NEW を付ける（トロフィーの一覧を開くと消える）
 const trophyList = () => trophyProgress(store.books(), zukanAuthors().flatMap((a) => a.series).filter((d) => !d.others));
-const TROPHY_ORDER = new Map(TROPHIES.map((t, i) => [t.id, i]));
-const TIER_RANK = { bronze: 1, silver: 2, gold: 3, platinum: 4 };
-const medal = (t) => `<span class="medal medal-${t.earned ? t.tier : 'locked'}" aria-hidden="true">${icon('trophy')}</span>`;
+const TIER_RANK = Object.fromEntries(TIERS.map((t, i) => [t, i + 1]));
+const medal = (t, locked = !t?.earned) => `<span class="medal medal-${locked ? 'locked' : t.tier}" aria-hidden="true"><i class="medal-fx"></i>${icon('trophy')}</span>`;
 const trophyWhen = (t) => (t.at ? `${monthLabel(t.at.slice(0, 7))}に達成` : '達成');
 const trophyLeft = (t) => `あと${Math.max(1, t.goal - t.value)}${t.unit}`;
+const pips = (f) => `<span class="trophy-pips" aria-label="${f.got} / ${f.levels.length}段">${f.levels.map((t) => `<i class="pip pip-${t.tier}${t.earned ? ' on' : ''}"></i>`).join('')}</span>`;
+let trophyFreshShown = new Set(); // 一覧を開いたときの NEW（開くと覚えから消すが、系統を開いたときにも見せる）
 // 最初の 1 回は、いま獲得している分を覚えるだけ（印を付けない）。戻り値：新しく獲得したトロフィー
 function noteTrophies(list = trophyList()) {
   const got = list.filter((t) => t.earned).map((t) => t.id);
@@ -2112,33 +2112,54 @@ function noteTrophies(list = trophyList()) {
   return fresh;
 }
 const wonText = (won) => `トロフィー「${won.map((t) => t.name).join('」「')}」を獲得！`;
-// 図鑑の最初のページ：獲得したトロフィー（新しい順）と、次に近いトロフィー
+// 図鑑の最初のページ：系統ごとのいちばん上のメダル（新しく獲得した順）と、次に近いトロフィー
 function trophyStrip() {
   const list = trophyList();
   noteTrophies(list);
   const fresh = new Set(ui.trophiesNew || []);
-  const got = list.filter((t) => t.earned).sort((a, b) => Number(fresh.has(b.id)) - Number(fresh.has(a.id)) || (b.at || '').localeCompare(a.at || '') || TIER_RANK[b.tier] - TIER_RANK[a.tier] || TROPHY_ORDER.get(b.id) - TROPHY_ORDER.get(a.id));
-  const near = list.filter((t) => !t.earned).sort((a, b) => b.value / b.goal - a.value / a.goal || a.goal - b.goal)[0];
-  return `<button type="button" class="trophy-strip" data-act="trophies" aria-label="トロフィー ${got.length} / ${list.length}。一覧を開く">
-    <span class="trophy-strip-head"><span class="trophy-strip-title">トロフィー</span><span class="trophy-strip-count"><b>${got.length}</b> / ${list.length}</span></span>
-    <span class="trophy-strip-row">${got.length ? got.slice(0, 8).map((t) => `<span class="trophy-mini${fresh.has(t.id) ? ' new' : ''}">${medal(t)}<span class="trophy-mini-name">${esc(t.name)}</span></span>`).join('') : '<span class="trophy-empty">本を読了にすると、トロフィーが集まります</span>'}</span>
+  const fams = trophyFamilies(list);
+  const isNew = (f) => f.levels.some((t) => fresh.has(t.id));
+  const shown = fams.filter((f) => f.top).sort((a, b) => Number(isNew(b)) - Number(isNew(a)) || TIER_RANK[b.top.tier] - TIER_RANK[a.top.tier] || (b.top.at || '').localeCompare(a.top.at || ''));
+  const near = fams.map((f) => f.next).filter(Boolean).sort((a, b) => b.value / b.goal - a.value / a.goal || a.goal - b.goal)[0];
+  const got = list.filter((t) => t.earned).length;
+  return `<button type="button" class="trophy-strip" data-act="trophies" aria-label="トロフィー ${got} / ${list.length}。一覧を開く">
+    <span class="trophy-strip-head"><span class="trophy-strip-title">トロフィー</span><span class="trophy-strip-count"><b>${got}</b> / ${list.length}</span></span>
+    <span class="trophy-strip-row">${shown.length ? shown.map((f) => `<span class="trophy-mini${isNew(f) ? ' new' : ''}">${medal(f.top)}<span class="trophy-mini-name">${esc(f.top.name)}</span></span>`).join('') : '<span class="trophy-empty">本を読了にすると、トロフィーが集まります</span>'}</span>
     ${near ? `<span class="trophy-strip-next">次は「${esc(near.name)}」：${esc(trophyLeft(near))}</span>` : ''}
   </button>`;
 }
+// 一覧：系統ごとに 1 枚（獲得した段が 2 つ以上なら重ねて見せる）。レア度の早見表つき
 function renderTrophies() {
   stopBookPreview(); flushMemo(); stopScanning(); openId = null;
   const list = trophyList();
   noteTrophies(list);
   const fresh = new Set(ui.trophiesNew || []);
-  if (fresh.size) { ui.trophiesNew = []; saveUi(); pendingRender = true; } // 閉じたら図鑑の NEW を消す
+  if (fresh.size) { trophyFreshShown = new Set([...trophyFreshShown, ...fresh]); ui.trophiesNew = []; saveUi(); pendingRender = true; } // 閉じたら図鑑の NEW を消す
+  const fams = trophyFamilies(list);
   const got = list.filter((t) => t.earned).length;
   sheetBody.innerHTML = `<h2 class="sheet-title">トロフィー</h2>
     <div class="trophy-lead"><span><b>${got}</b> / ${list.length}</span>${zbar(got, list.length)}</div>
-    ${TROPHY_GROUPS.map(([g, name]) => `<section class="trophy-group"><h3>${esc(name)}</h3><ul class="trophy-grid">${list.filter((t) => t.group === g).map((t) => `<li class="trophy ${t.earned ? 'on' : 'off'}${fresh.has(t.id) ? ' new' : ''}">
-      ${medal(t)}<span class="trophy-name">${esc(t.name)}</span>${t.hint ? `<span class="trophy-hint">${esc(t.hint)}</span>` : ''}
-      <span class="trophy-when">${esc(t.earned ? trophyWhen(t) : trophyLeft(t))}</span>${t.earned ? '' : zbar(t.value, t.goal)}${fresh.has(t.id) ? '<span class="trophy-new">NEW</span>' : ''}</li>`).join('')}</ul></section>`).join('')}
-    <p class="source">読了日と、読書図鑑のシリーズから数えています。シリーズの制覇は、図鑑で「コンプリート」になったシリーズです。</p>`;
+    <ol class="tier-ladder" aria-label="レア度（低い順）">${TIERS.map((t) => `<li>${medal({ tier: t, earned: true })}<span class="tier-name tier-${t}">${esc(TIER_NAME[t])}</span></li>`).join('')}</ol>
+    ${TROPHY_GROUPS.map(([g, name]) => `<section class="trophy-group"><h3>${esc(name)}</h3><ul class="trophy-grid">${fams.filter((f) => f.group === g).map((f) => {
+      const face = f.top || f.levels[0];
+      const isNew = f.levels.some((t) => trophyFreshShown.has(t.id));
+      return `<li><button type="button" class="trophy ${f.top ? 'on' : 'off'}${f.got >= 2 ? ` stacked stack-${Math.min(f.got - 1, 2)}` : ''}${isNew ? ' new' : ''}" data-act="trophy-family" data-f="${esc(f.id)}">
+        ${medal(face, !f.top)}<span class="trophy-name">${esc(f.top ? f.top.name : f.name)}</span><span class="trophy-hint">${esc(f.top ? f.name : f.about(f.levels[0].goal))}</span>
+        ${pips(f)}<span class="trophy-when">${esc(f.next ? `次：${f.next.name}（${trophyLeft(f.next)}）` : 'すべて達成')}</span>${isNew ? '<span class="trophy-new">NEW</span>' : ''}</button></li>`;
+    }).join('')}</ul></section>`).join('')}
+    <p class="source">読了日と、読書図鑑のシリーズから数えています。同じ系統のトロフィーは重ねてあり、タップすると段ごとの達成日が見られます。</p>`;
   showSheet();
+  sheetBody.scrollTop = 0;
+}
+// 系統を開く：段ごとのメダル・レア度・達成した日（まだなら残りの数とゲージ）
+function renderTrophyFamily(id) {
+  const f = trophyFamilies(trophyList()).find((x) => x.id === id);
+  if (!f) { renderTrophies(); return; }
+  sheetBody.innerHTML = `<button type="button" class="link trophy-back" data-act="trophies">‹ トロフィー</button>
+    <div class="trophy-hero">${medal(f.top || f.levels[0], !f.top)}<h2 class="sheet-title">${esc(f.name)}</h2><p>${f.got} / ${f.levels.length}段${f.top ? `・いまは<b class="tier-name tier-${f.top.tier}">${esc(TIER_NAME[f.top.tier])}</b>` : ''}</p></div>
+    <ol class="trophy-levels">${[...f.levels].reverse().map((t) => `<li class="${t.earned ? 'on' : 'off'}${trophyFreshShown.has(t.id) ? ' new' : ''}">${medal(t, false)}
+      <span class="tl-main"><span class="tl-name">${esc(t.name)}</span><span class="tl-sub"><span class="tier-name tier-${t.tier}">${esc(TIER_NAME[t.tier])}</span>${esc(t.hint)}</span>
+        ${t.earned ? `<span class="tl-when">${esc(trophyWhen(t))}</span>` : `<span class="tl-left">${esc(trophyLeft(t))}</span>${zbar(t.value, t.goal)}`}</span>${trophyFreshShown.has(t.id) ? '<span class="trophy-new">NEW</span>' : ''}</li>`).join('')}</ol>`;
   sheetBody.scrollTop = 0;
 }
 
@@ -2663,6 +2684,7 @@ const actions = {
     toast(`「${mainTitle(b.title)}」を読書中にしました`);
   },
   trophies: () => renderTrophies(),
+  'trophy-family': (el) => renderTrophyFamily(el.dataset.f),
   'scan-undo': (el) => {
     const s = scanned.find((x) => x.isbn === el.dataset.isbn);
     if (s?.bookId) store.remove(s.bookId);
@@ -2909,6 +2931,99 @@ sheet.addEventListener('close', () => {
   unlockPage();
   sheetClosed();
 });
+
+// ---------------------------------------------------------------- 本棚の並べ方を左右のスワイプで切り替える（v0.17 本人の①：タップだけでなくスライドでも）
+// 指を左へ払うと右隣の並べ方（著者順→登録順→…→シリーズ）、右へ払うと左隣。縦のスクロールや入力欄・横に動く部品の上では切り替えない
+let shelfSwipe = null;
+const swipeTargets = () => [...document.querySelectorAll('.shelf > :not(.page-head):not(.shelf-tabs)')];
+view.addEventListener('touchstart', (e) => {
+  shelfSwipe = null;
+  if (route.name !== 'shelf' || e.touches.length !== 1 || sheet.open) return;
+  if (e.target.closest('input, textarea, select, .shelf-genres, .series-vols, .shelf-tabs')) return;
+  const t = e.touches[0];
+  shelfSwipe = { x: t.clientX, y: t.clientY, dx: 0, on: false };
+}, { passive: true });
+view.addEventListener('touchmove', (e) => {
+  const s = shelfSwipe;
+  if (!s) return;
+  const t = e.touches[0];
+  s.dx = t.clientX - s.x;
+  const dy = t.clientY - s.y;
+  if (!s.on) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(s.dx)) { shelfSwipe = null; return; } // 縦のスクロール
+    if (Math.abs(s.dx) < 14 || Math.abs(s.dx) < Math.abs(dy) * 1.5) return;
+    s.on = true;
+    s.idx = SHELF_MODES.findIndex(([id]) => id === ui.sort);
+  }
+  // 端の並べ方では少しだけ動かす（それ以上はない合図）
+  const edge = (s.dx > 0 && s.idx === 0) || (s.dx < 0 && s.idx === SHELF_MODES.length - 1);
+  const move = edge ? s.dx * 0.15 : s.dx * 0.45;
+  for (const el of swipeTargets()) { el.style.transition = 'none'; el.style.transform = `translateX(${move}px)`; el.style.opacity = String(1 - Math.min(Math.abs(move) / 400, 0.35)); }
+}, { passive: true });
+view.addEventListener('touchend', () => {
+  const s = shelfSwipe;
+  shelfSwipe = null;
+  if (!s?.on) return;
+  const next = s.idx + (s.dx < 0 ? 1 : -1);
+  const reset = () => swipeTargets().forEach((el) => { el.style.transition = 'transform .25s cubic-bezier(.2,.8,.3,1), opacity .25s'; el.style.transform = ''; el.style.opacity = ''; });
+  if (Math.abs(s.dx) < 60 || next < 0 || next >= SHELF_MODES.length) { reset(); return; }
+  ui.sort = SHELF_MODES[next][0]; shelfLimit = 24; saveUi();
+  renderShelf();
+  // 新しい並べ方は、払った向きから入ってくる
+  const from = s.dx < 0 ? 36 : -36;
+  for (const el of swipeTargets()) el.animate([{ transform: `translateX(${from}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  document.querySelector('.shelf-mode.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+});
+view.addEventListener('touchcancel', () => { if (shelfSwipe?.on) swipeTargets().forEach((el) => { el.style.transform = ''; el.style.opacity = ''; }); shelfSwipe = null; });
+
+// ---------------------------------------------------------------- 下のナビ：ガラスの面を持って左右に動かし、離したタブへ（v0.17 本人の②）
+// 押さえたまま横に動かすと、ガラスの面が指について大きくなり、離したところのタブを開く。そのまま触れて離したときは普通のタップ
+const tabbar = $('.tabbar');
+let navDrag = null;
+let navSuppressClick = false;
+const navTabs = () => [...tabbar.querySelectorAll('.tab')];
+function navNearest(x) {
+  const tabs = navTabs();
+  let best = 0, dist = Infinity;
+  tabs.forEach((t, i) => { const r = t.getBoundingClientRect(); const d = Math.abs(r.left + r.width / 2 - x); if (d < dist) { dist = d; best = i; } });
+  return best;
+}
+tabbar.addEventListener('pointerdown', (e) => {
+  if (e.button > 0 || !tabbar.classList.contains('has-glider')) return;
+  navDrag = { id: e.pointerId, x0: e.clientX, on: false };
+});
+tabbar.addEventListener('pointermove', (e) => {
+  const d = navDrag;
+  if (!d || e.pointerId !== d.id) return;
+  if (!d.on) {
+    if (Math.abs(e.clientX - d.x0) < 10) return;
+    d.on = true;
+    try { tabbar.setPointerCapture(e.pointerId); } catch { /* 取れなくても動く */ }
+    tabbar.classList.add('dragging');
+  }
+  const glider = $('.tab-glider');
+  const box = tabbar.getBoundingClientRect();
+  const w = glider.offsetWidth;
+  const left = Math.max(4, Math.min(box.width - w - 4, e.clientX - box.left - w / 2));
+  glider.style.transform = `translateX(${left}px) scale(1.12)`;
+  const at = navNearest(e.clientX);
+  navTabs().forEach((t, i) => t.classList.toggle('drag-over', i === at));
+});
+const navDrop = (e) => {
+  const d = navDrag;
+  navDrag = null;
+  if (!d?.on) return;
+  tabbar.classList.remove('dragging');
+  navTabs().forEach((t) => t.classList.remove('drag-over'));
+  navSuppressClick = true; // 離したあとに来るタップは無視（ドラッグの開始位置のタブを開かない）
+  setTimeout(() => { navSuppressClick = false; }, 400);
+  const tab = navTabs()[navNearest(e.clientX)];
+  if (e.type === 'pointercancel' || tab.getAttribute('aria-current') === 'page') { placeGlider(true); return; }
+  location.hash = tab.getAttribute('href');
+};
+tabbar.addEventListener('pointerup', navDrop);
+tabbar.addEventListener('pointercancel', navDrop);
+tabbar.addEventListener('click', (e) => { if (navSuppressClick) { e.preventDefault(); e.stopPropagation(); navSuppressClick = false; } }, true);
 
 // ---------------------------------------------------------------- 起動
 store.load();

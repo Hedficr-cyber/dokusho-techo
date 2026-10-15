@@ -16,7 +16,10 @@ export function plainSynopsis(value) {
     .replace(/\r/g,'').replace(/\n{3,}/g,'\n\n').trim().slice(0,12000);
 }
 // 図書館によっては内容紹介の欄に「講談社文庫, [こ-72-2]」のような叢書の注記を入れる。文になっていない短い注記は除く
-export const looksLikeSynopsis=s=>!!s && (s.length>=40 || /[。！？!?」]/.test(s));
+// v0.17：長い注記（「新潮文庫, 10163, ち-7-2 . 天久鷹央の推理カルテ / 知念実希人著||アメク タカオ…」
+// 「メディアワークス文庫, 0247, 0271, …」）も、文の終わり（。！？）がなければあらすじにしない
+const SERIES_NOTE=/(文庫|新書|ノベルス|ノベルズ|ブックス|叢書|選書|コミックス)\s*[,，]/;
+export const looksLikeSynopsis=s=>!!s && !s.includes('||') && !(SERIES_NOTE.test(s) && !/[。！？!?」]/.test(s)) && (s.length>=40 || /[。！？!?」]/.test(s));
 export function publicationDate(raw) {
   let s=String(raw || '').trim();
   if (/^\d{8}$/.test(s)) s=`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6)}`;
@@ -120,7 +123,9 @@ export const bookDetailsKey=book=>PREFIX+(coverIsbn(book.isbn) || `${normTitle(b
 function cached(book) {
   const key=bookDetailsKey(book);
   if (memory.has(key)) return memory.get(key);
-  try {const hit=JSON.parse(localStorage.getItem(key) || 'null');if(hit?.data && typeof hit.data.synopsis==='string'){memory.set(key,hit);return hit;}} catch {}
+  try {const hit=JSON.parse(localStorage.getItem(key) || 'null');if(hit?.data && typeof hit.data.synopsis==='string'){
+    if(hit.data.synopsis && !looksLikeSynopsis(hit.data.synopsis))hit.data.synopsis=''; // 前の版で覚えた叢書の注記は出さない
+    memory.set(key,hit);return hit;}} catch {}
   return null;
 }
 export const peekBookDetails=book=>cached(book)?.data || null;

@@ -851,7 +851,6 @@ input::-webkit-caps-lock-indicator { width:18px; height:18px; align-self:center;
 .medal-bronze { background:linear-gradient(140deg,#efc49d,#b07a4f 55%,#e2ad82); color:#4a2a12; }
 .medal-silver { background:linear-gradient(140deg,#f7f7f9,#a9a9b2 55%,#e8e8ec); color:#36363c; }
 .medal-gold { background:linear-gradient(140deg,#fbe6a2,#c9a043 55%,#f2d27c); color:#4a3608; }
-.medal-platinum { background:linear-gradient(140deg,#f3f8fb,#9fb5c4 50%,#e6eef3); color:#2d3a44; }
 .medal-locked { background:var(--surface-2); color:var(--ink-2); box-shadow:none; opacity:.55; }
 .trophy-strip { display:flex; flex-direction:column; gap:12px; width:100%; margin:0 0 26px; padding:16px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:inherit; font:inherit; text-align:left; cursor:pointer; }
 .trophy-strip-head { display:flex; align-items:baseline; justify-content:space-between; }
@@ -880,3 +879,75 @@ input::-webkit-caps-lock-indicator { width:18px; height:18px; align-self:center;
 .trophy .zbar { width:72%; margin-top:4px; }
 .trophy-new { position:absolute; top:8px; right:8px; padding:1px 6px; border-radius:7px; font-size:9px; font-weight:800; background:var(--ink); color:var(--paper); }
 .trophy.new { border-color:var(--ink); }
+
+/* v0.17 ⑦ メダルのレア度は 6 段階：ブロンズ・シルバー・ゴールド・プラチナ（つやの光が流れる）・ダイヤ（星がまたたく）・レジェンド（虹色のホログラムが巡り、光る） */
+.medal { position:relative; overflow:hidden; isolation:isolate; }
+.medal svg { position:relative; z-index:2; }
+.medal-fx { position:absolute; inset:0; z-index:1; border-radius:inherit; pointer-events:none; }
+.medal-gold .medal-fx { background:radial-gradient(circle at 30% 24%, #fffbe6cc 0 18%, transparent 42%); }
+.medal-platinum { background:linear-gradient(140deg,#ffffff,#d7e2ea 40%,#9fb4c3 62%,#eef4f8); color:#22303a; }
+.medal-platinum .medal-fx { background:linear-gradient(115deg,transparent 30%,#ffffffd9 46%,transparent 62%); background-size:260% 100%; animation:medal-sheen 3.8s ease-in-out infinite; }
+.medal-diamond { background:conic-gradient(from 25deg,#effcff,#a7e4ff,#f7f1ff,#b7cfff,#e8fbff,#c4f3ff,#f1e8ff,#a6d8ff,#effcff); color:#173a52; box-shadow:inset 0 1px 0 #ffffffcc,inset 0 -2px 4px #2a5c7a30,0 0 10px #9fdcff99,0 2px 6px #00000024; }
+.medal-diamond .medal-fx { background:radial-gradient(circle at 26% 30%,#fff 0 1.6px,transparent 2.8px),radial-gradient(circle at 74% 62%,#fff 0 1.3px,transparent 2.4px),radial-gradient(circle at 66% 20%,#fff 0 1.1px,transparent 2.1px),radial-gradient(circle at 34% 76%,#fff 0 1px,transparent 2px),linear-gradient(115deg,transparent 35%,#ffffffb3 48%,transparent 60%); background-size:100% 100%,100% 100%,100% 100%,100% 100%,260% 100%; animation:medal-twinkle 2.2s ease-in-out infinite,medal-sheen-5 4.4s ease-in-out infinite; }
+.medal-legend { color:#fff; background:conic-gradient(from 0deg,#ff5f9e,#ffad5f,#ffee5f,#6dff9b,#5fd2ff,#8b72ff,#ff5fe8,#ff5f9e); box-shadow:inset 0 0 0 2px #ffffffb3,inset 0 -3px 6px #00000030,0 0 14px 2px #ff7ad299,0 0 22px 5px #7ac8ff59; animation:medal-hue 5s linear infinite,medal-glow 2.6s ease-in-out infinite; }
+.medal-legend svg { filter:drop-shadow(0 1px 1.5px #00000059); }
+.medal-legend .medal-fx { background:radial-gradient(circle at 24% 28%,#fff 0 1.8px,transparent 3px),radial-gradient(circle at 76% 34%,#fff 0 1.4px,transparent 2.6px),radial-gradient(circle at 68% 76%,#fff 0 1.6px,transparent 2.8px),radial-gradient(circle at 30% 72%,#fff 0 1.1px,transparent 2.2px),linear-gradient(120deg,transparent 30%,#ffffffcc 47%,transparent 62%); background-size:100% 100%,100% 100%,100% 100%,100% 100%,280% 100%; animation:medal-twinkle 1.8s ease-in-out infinite,medal-sheen-5 3s ease-in-out infinite; }
+@keyframes medal-sheen { 0%,50% { background-position:160% 0; } 100% { background-position:-110% 0; } }
+@keyframes medal-sheen-5 { 0%,50% { background-position:0 0,0 0,0 0,0 0,160% 0; } 100% { background-position:0 0,0 0,0 0,0 0,-110% 0; } }
+@keyframes medal-twinkle { 0%,100% { opacity:.45; } 50% { opacity:1; } }
+@keyframes medal-hue { to { filter:hue-rotate(360deg); } }
+@keyframes medal-glow { 0%,100% { box-shadow:inset 0 0 0 2px #ffffffb3,inset 0 -3px 6px #00000030,0 0 12px 1px #ff7ad280,0 0 18px 4px #7ac8ff4d; } 50% { box-shadow:inset 0 0 0 2px #ffffffd9,inset 0 -3px 6px #00000030,0 0 18px 4px #ff7ad2b3,0 0 30px 8px #7ac8ff73; } }
+.medal-locked .medal-fx { display:none; }
+.tier-name { font-weight:700; }
+.tier-bronze { color:#a8693f; } .tier-silver { color:#7d7d88; } .tier-gold { color:#b3871f; } .tier-platinum { color:#5f7d92; } .tier-diamond { color:#3c8fc4; }
+.tier-legend { background:linear-gradient(90deg,#ff5f9e,#ffad5f,#e8c400,#3ccf72,#3fb4ec,#8b72ff,#ff5fe8); -webkit-background-clip:text; background-clip:text; color:transparent; }
+@media(prefers-color-scheme:dark) { .tier-bronze { color:#e2ad82; } .tier-silver { color:#c9c9d2; } .tier-gold { color:#f2d27c; } .tier-platinum { color:#c9dbe7; } .tier-diamond { color:#9fdcff; } }
+@media (prefers-reduced-motion:reduce) { .medal-platinum .medal-fx, .medal-diamond .medal-fx, .medal-legend .medal-fx, .medal-legend { animation:none; } }
+
+/* レア度の早見表 */
+.tier-ladder { list-style:none; margin:18px 0 0; padding:12px 6px; display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:4px; border:1px solid var(--line); border-radius:16px; background:var(--surface); }
+.tier-ladder li { display:flex; flex-direction:column; align-items:center; gap:5px; }
+.tier-ladder .medal { width:34px; height:34px; }
+.tier-ladder .medal svg { width:18px; height:18px; }
+.tier-ladder .tier-name { font-size:9.5px; white-space:nowrap; }
+
+/* ⑥ 系統ごとに 1 枚。獲得した段が 2 つ以上なら、後ろにカードを重ねて見せる */
+.trophy-grid > li { display:flex; position:relative; z-index:0; }
+button.trophy { width:100%; font:inherit; color:inherit; cursor:pointer; margin-bottom:6px; }
+.trophy.stacked::before, .trophy.stacked::after { content:""; position:absolute; z-index:-1; left:7px; right:7px; height:100%; top:0; border:1px solid var(--line); border-radius:16px; background:var(--surface); }
+.trophy.stacked::before { transform:translateY(5px); opacity:.9; }
+.trophy.stack-2::after { left:14px; right:14px; transform:translateY(10px); opacity:.7; }
+.trophy.stack-1::after { display:none; }
+.trophy.stack-2 { margin-bottom:12px; }
+.trophy-pips { display:flex; gap:3px; margin:4px 0 1px; }
+.pip { width:7px; height:7px; border-radius:50%; background:var(--line); }
+.pip.on.pip-bronze { background:#c08257; } .pip.on.pip-silver { background:#a9a9b2; } .pip.on.pip-gold { background:#d4ab45; } .pip.on.pip-platinum { background:#9fb4c3; } .pip.on.pip-diamond { background:#7fd0ff; }
+.pip.on.pip-legend { background:conic-gradient(#ff5f9e,#ffee5f,#6dff9b,#5fd2ff,#8b72ff,#ff5f9e); }
+.trophy .trophy-when { font-size:10.5px; line-height:1.5; }
+
+/* 系統を開いたところ：段ごとのメダル・レア度・達成した日 */
+.trophy-back { font-size:13px; color:var(--ink-2); margin:2px 0 14px; }
+.trophy-hero { display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; margin-bottom:14px; }
+.trophy-hero .medal { width:84px; height:84px; }
+.trophy-hero .medal svg { width:42px; height:42px; }
+.trophy-hero .sheet-title { margin:6px 0 0; padding:0; }
+.trophy-hero p { font-size:12px; color:var(--ink-2); }
+.trophy-levels { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.trophy-levels li { position:relative; display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--line); border-radius:16px; background:var(--surface); }
+.trophy-levels li.off .medal { opacity:.32; filter:saturate(.55); } /* まだの段も、目指すレア度の色をうっすら見せる */
+.trophy-levels li.new { border-color:var(--ink); }
+.tl-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.tl-name { font-size:14px; font-weight:700; }
+.trophy-levels li.off .tl-name { color:var(--ink-2); }
+.tl-sub { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:11px; color:var(--ink-2); }
+.tl-when { font-size:12px; font-weight:600; }
+.tl-left { font-size:12px; color:var(--ink-2); }
+.trophy-levels .zbar { width:70%; }
+
+/* v0.17 ① 本棚は左右に払って並べ方を切り替える（縦のスクロールはそのまま） ② 下のナビはガラスの面を持って左右に動かせる */
+.shelf { touch-action:pan-y; }
+.tabbar { touch-action:none; -webkit-user-select:none; user-select:none; }
+.tabbar.dragging .tab-glider { transition:transform .07s linear; background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px var(--glass-edge),0 8px 22px #27272e33,inset 0 2px 6px #ffffffb3; }
+.tabbar.dragging .tab.drag-over { color:var(--ink); }
+.tabbar.dragging .tab:not(.drag-over) { opacity:.72; }
+@media(prefers-color-scheme:dark) { .tabbar.dragging .tab-glider { background:rgba(120,120,128,.5); } }

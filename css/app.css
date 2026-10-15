@@ -947,7 +947,13 @@ button.trophy { width:100%; font:inherit; color:inherit; cursor:pointer; margin-
 /* v0.17 ① 本棚は左右に払って並べ方を切り替える（縦のスクロールはそのまま） ② 下のナビはガラスの面を持って左右に動かせる */
 .shelf { touch-action:pan-y; }
 .tabbar { touch-action:none; -webkit-user-select:none; user-select:none; }
-.tabbar.dragging .tab-glider { transition:transform .07s linear; background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px var(--glass-edge),0 8px 22px #27272e33,inset 0 2px 6px #ffffffb3; }
+.tabbar.dragging .tab-glider { transition:none; background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px var(--glass-edge),0 8px 22px #27272e33,inset 0 2px 6px #ffffffb3; }
 .tabbar.dragging .tab.drag-over { color:var(--ink); }
 .tabbar.dragging .tab:not(.drag-over) { opacity:.72; }
 @media(prefers-color-scheme:dark) { .tabbar.dragging .tab-glider { background:rgba(120,120,128,.5); } }
+
+/* v0.17.2 本人「スライドがカクつく・残像が残る」：並べ方のボタンより下の 1 枚だけを動かす。動かしている間だけ別の層に。
+   切り替えて入ってくる間は、本が下から浮かび上がる動きを止める（二重の動きが残像に見えた）。はみ出した分で横にスクロールしない */
+.view { overflow-x:clip; } /* 動かした本棚は画面の端で切る（余白の線で切れて見えない・横にスクロールしない） */
+.shelf-pane.swiping { will-change:transform; }
+.shelf-pane.no-reveal .reveal-item { opacity:1 !important; transform:none !important; transition:none !important; }

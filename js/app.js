@@ -363,6 +363,7 @@ function renderShelf() {
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id,label])=>`<button type="button" class="shelf-mode ${ui.sort===id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort===id}">${label}</button>`).join('')}
     </div>
+    <div class="shelf-pane">
     <label class="search-wrap shelf-search">${icon('search')}<span class="sr-only">本棚を検索</span><input id="shelf-q" type="search" placeholder="本棚を検索" value="${esc(ui.q)}" autocomplete="off"></label>
     ${ui.sort==='genre' ? `<div class="shelf-genres" role="group" aria-label="本棚のジャンル">${genreButtons.map(([id,label])=>`<button type="button" class="genre-filter ${ui.genre===id ? 'on' : ''}" data-act="shelf-filter-genre" data-v="${id}" aria-pressed="${ui.genre===id}">${esc(label)}</button>`).join('')}</div>` : ''}
     ${['year','added'].includes(ui.sort) ? `<div class="shelf-direction" role="group" aria-label="${ui.sort==='year' ? '刊行日' : '登録日'}の並び順">${[['desc',ui.sort==='year' ? '新しい順' : '新しく登録した順'],['asc',ui.sort==='year' ? '古い順' : '古く登録した順']].map(([id,label])=>`<button type="button" data-act="shelf-direction" data-v="${id}" class="direction-btn ${direction===id ? 'on' : ''}" aria-pressed="${direction===id}">${label}<span class="sr-only">（${id==='asc' ? '昇順' : '降順'}）</span></button>`).join('')}</div>` : ''}
@@ -373,6 +374,7 @@ function renderShelf() {
     ${ui.genre && ui.sort!=='genre' ? `<button type="button" class="clear-genre" data-act="shelf-filter-genre" data-v="">${esc(genreLabel)} ${icon('close')}<span class="sr-only">絞り込みを解除</span></button>` : ''}
     ${list.length ? `<ul class="books shelf-books ${ui.bookView==='list' ? 'list-view' : 'grid-view'}">${rows}</ul>` : emptyShelf(all.length)}
     ${list.length ? `<p class="shelf-end" role="status" aria-live="polite">${shown.length} / ${list.length}冊</p>` : ''}
+    </div>
   </section>`;
   watchShelfEnd(list);
   prepareBooks(view);
@@ -494,9 +496,11 @@ function renderSeriesShelf() {
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
     </div>
+    <div class="shelf-pane">
     <label class="search-wrap shelf-search">${icon('search')}<span class="sr-only">シリーズを検索</span><input id="shelf-q" type="search" placeholder="シリーズを検索" value="${esc(ui.q)}" autocomplete="off"></label>
     <div class="shelf-bar"><div class="shelf-caption"><span>シリーズの続き</span><p class="count" id="series-count" aria-live="polite"></p></div></div>
     <div id="series-list"></div>
+    </div>
   </section>`;
   drawSeries();
   loadSeriesVolumes();
@@ -2933,15 +2937,25 @@ sheet.addEventListener('close', () => {
 });
 
 // ---------------------------------------------------------------- 本棚の並べ方を左右のスワイプで切り替える（v0.17 本人の①：タップだけでなくスライドでも）
-// 指を左へ払うと右隣の並べ方（著者順→登録順→…→シリーズ）、右へ払うと左隣。縦のスクロールや入力欄・横に動く部品の上では切り替えない
+// v0.17.2 本人「カクつく・残像が残る」：動かすのは並べ方のボタンより下の 1 枚（.shelf-pane）だけにし、指の動きは 1 コマに 1 回だけ反映する。
+// 透明度は変えない（iPhone で画像の多い面の透明度を変えると残像が出る）。横に払っている間は縦にスクロールさせない。
+// 切り替えるときは、今の並びを払った向きへ送り出してから、新しい並びを反対側から入れる（入れる間は本の浮かび上がりを止める）
 let shelfSwipe = null;
-const swipeTargets = () => [...document.querySelectorAll('.shelf > :not(.page-head):not(.shelf-tabs)')];
+let shelfSliding = false;
+const shelfPane = () => document.querySelector('.shelf-pane');
+const PANE_EASE = 'cubic-bezier(.22,.8,.3,1)';
+function setPane(x, transition = 'none') {
+  const el = shelfPane();
+  if (!el) return;
+  el.style.transition = transition;
+  el.style.transform = x ? `translate3d(${x}px,0,0)` : '';
+}
 view.addEventListener('touchstart', (e) => {
   shelfSwipe = null;
-  if (route.name !== 'shelf' || e.touches.length !== 1 || sheet.open) return;
-  if (e.target.closest('input, textarea, select, .shelf-genres, .series-vols, .shelf-tabs')) return;
+  if (route.name !== 'shelf' || e.touches.length !== 1 || sheet.open || shelfSliding) return;
+  if (!e.target.closest('.shelf-pane') || e.target.closest('input, textarea, select, .shelf-genres, .series-vols')) return;
   const t = e.touches[0];
-  shelfSwipe = { x: t.clientX, y: t.clientY, dx: 0, on: false };
+  shelfSwipe = { x: t.clientX, y: t.clientY, dx: 0, on: false, raf: 0 };
 }, { passive: true });
 view.addEventListener('touchmove', (e) => {
   const s = shelfSwipe;
@@ -2951,30 +2965,52 @@ view.addEventListener('touchmove', (e) => {
   const dy = t.clientY - s.y;
   if (!s.on) {
     if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(s.dx)) { shelfSwipe = null; return; } // 縦のスクロール
-    if (Math.abs(s.dx) < 14 || Math.abs(s.dx) < Math.abs(dy) * 1.5) return;
+    if (Math.abs(s.dx) < 12 || Math.abs(s.dx) < Math.abs(dy) * 1.4) return;
     s.on = true;
     s.idx = SHELF_MODES.findIndex(([id]) => id === ui.sort);
+    s.w = shelfPane()?.offsetWidth || innerWidth;
+    s.x += s.dx > 0 ? 12 : -12; // 動き出した位置から指につける（最初の 12px で跳ねない）
+    s.dx = t.clientX - s.x;
+    shelfPane()?.classList.add('swiping');
   }
-  // 端の並べ方では少しだけ動かす（それ以上はない合図）
-  const edge = (s.dx > 0 && s.idx === 0) || (s.dx < 0 && s.idx === SHELF_MODES.length - 1);
-  const move = edge ? s.dx * 0.15 : s.dx * 0.45;
-  for (const el of swipeTargets()) { el.style.transition = 'none'; el.style.transform = `translateX(${move}px)`; el.style.opacity = String(1 - Math.min(Math.abs(move) / 400, 0.35)); }
-}, { passive: true });
-view.addEventListener('touchend', () => {
+  if (e.cancelable) e.preventDefault();
+  if (!s.raf) s.raf = requestAnimationFrame(() => {
+    s.raf = 0;
+    if (shelfSwipe !== s) return;
+    const edge = (s.dx > 0 && s.idx === 0) || (s.dx < 0 && s.idx === SHELF_MODES.length - 1);
+    setPane(edge ? s.dx * 0.18 : s.dx); // 端の並べ方は少しだけ（それ以上はない合図）
+  });
+}, { passive: false });
+function endShelfSwipe() {
   const s = shelfSwipe;
   shelfSwipe = null;
   if (!s?.on) return;
-  const next = s.idx + (s.dx < 0 ? 1 : -1);
-  const reset = () => swipeTargets().forEach((el) => { el.style.transition = 'transform .25s cubic-bezier(.2,.8,.3,1), opacity .25s'; el.style.transform = ''; el.style.opacity = ''; });
-  if (Math.abs(s.dx) < 60 || next < 0 || next >= SHELF_MODES.length) { reset(); return; }
-  ui.sort = SHELF_MODES[next][0]; shelfLimit = 24; saveUi();
-  renderShelf();
-  // 新しい並べ方は、払った向きから入ってくる
-  const from = s.dx < 0 ? 36 : -36;
-  for (const el of swipeTargets()) el.animate([{ transform: `translateX(${from}px)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.2,.8,.3,1)' });
-  document.querySelector('.shelf-mode.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-});
-view.addEventListener('touchcancel', () => { if (shelfSwipe?.on) swipeTargets().forEach((el) => { el.style.transform = ''; el.style.opacity = ''; }); shelfSwipe = null; });
+  cancelAnimationFrame(s.raf);
+  const dir = s.dx < 0 ? 1 : -1;
+  const next = s.idx + dir;
+  if (Math.abs(s.dx) < Math.min(70, s.w * 0.18) || next < 0 || next >= SHELF_MODES.length) {
+    setPane(0, `transform .3s ${PANE_EASE}`);
+    setTimeout(() => shelfPane()?.classList.remove('swiping'), 320);
+    return;
+  }
+  shelfSliding = true;
+  setPane(-dir * s.w, 'transform .17s cubic-bezier(.45,0,.9,.55)'); // 今の並びを送り出す
+  setTimeout(() => {
+    ui.sort = SHELF_MODES[next][0]; shelfLimit = 24; saveUi();
+    renderShelf();
+    const fresh = shelfPane();
+    if (!fresh) { shelfSliding = false; return; }
+    fresh.classList.add('swiping', 'no-reveal');
+    setPane(dir * s.w * 0.4);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setPane(0, `transform .32s ${PANE_EASE}`);
+      shelfSliding = false; // 入り始めたら、続けて次のスワイプを受け付ける（連続で払っても止まらない）
+      setTimeout(() => { fresh.classList.remove('no-reveal'); if (!shelfSwipe?.on) { fresh.classList.remove('swiping'); if (!fresh.style.transform) fresh.style.transition = ''; } }, 340);
+    }));
+  }, 170);
+}
+view.addEventListener('touchend', endShelfSwipe);
+view.addEventListener('touchcancel', () => { if (shelfSwipe?.on) { cancelAnimationFrame(shelfSwipe.raf); setPane(0, `transform .3s ${PANE_EASE}`); } shelfSwipe = null; });
 
 // ---------------------------------------------------------------- 下のナビ：ガラスの面を持って左右に動かし、離したタブへ（v0.17 本人の②）
 // 押さえたまま横に動かすと、ガラスの面が指について大きくなり、離したところのタブを開く。そのまま触れて離したときは普通のタップ
@@ -3001,18 +3037,26 @@ tabbar.addEventListener('pointermove', (e) => {
     try { tabbar.setPointerCapture(e.pointerId); } catch { /* 取れなくても動く */ }
     tabbar.classList.add('dragging');
   }
-  const glider = $('.tab-glider');
-  const box = tabbar.getBoundingClientRect();
-  const w = glider.offsetWidth;
-  const left = Math.max(4, Math.min(box.width - w - 4, e.clientX - box.left - w / 2));
-  glider.style.transform = `translateX(${left}px) scale(1.12)`;
-  const at = navNearest(e.clientX);
-  navTabs().forEach((t, i) => t.classList.toggle('drag-over', i === at));
+  d.cx = e.clientX;
+  if (d.raf) return;
+  // 指の動きは 1 コマに 1 回だけ反映する（v0.17.2 カクつき）
+  d.raf = requestAnimationFrame(() => {
+    d.raf = 0;
+    if (navDrag !== d) return;
+    const glider = $('.tab-glider');
+    const box = tabbar.getBoundingClientRect();
+    const w = glider.offsetWidth;
+    const left = Math.max(4, Math.min(box.width - w - 4, d.cx - box.left - w / 2));
+    glider.style.transform = `translate3d(${left}px,0,0) scale(1.12)`;
+    const at = navNearest(d.cx);
+    navTabs().forEach((t, i) => t.classList.toggle('drag-over', i === at));
+  });
 });
 const navDrop = (e) => {
   const d = navDrag;
   navDrag = null;
   if (!d?.on) return;
+  cancelAnimationFrame(d.raf);
   tabbar.classList.remove('dragging');
   navTabs().forEach((t) => t.classList.remove('drag-over'));
   navSuppressClick = true; // 離したあとに来るタップは無視（ドラッグの開始位置のタブを開かない）

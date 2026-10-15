@@ -12,7 +12,7 @@ import {
 
 import { loadBookDetails, peekBookDetails, prefetchBookDetails, bookDetailsKey, subscribeBookDetails, publicationDate, publicationLabel } from './book-details.js';
 import { revealBooks } from './reveal.js';
-import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo, splitVolume } from './series.js';
+import { shelfSeries, seriesVolumesFromWorks, describeSeries, isRealSeries, storySeries, seriesWorksOf, NO_SERIES, standaloneWorks, workBase, volInfo, splitVolume, volumeNumber } from './series.js';
 import { TIERS, TIER_NAME, TROPHY_GROUPS, trophyProgress, trophyFamilies } from './trophies.js';
 import * as sync from './sync.js';
 import { VERSION_HISTORY } from './versions.js';
@@ -3025,11 +3025,54 @@ tabbar.addEventListener('pointerup', navDrop);
 tabbar.addEventListener('pointercancel', navDrop);
 tabbar.addEventListener('click', (e) => { if (navSuppressClick) { e.preventDefault(); e.stopPropagation(); navSuppressClick = false; } }, true);
 
+// ---------------------------------------------------------------- 別の巻の ISBN を直す（v0.17.1 本人：invert の表紙・年が invert 2 のものだった）
+// 最初に作った本棚の表で「invert」に「invert 2」（国立国会図書館では書名「invert」巻次「2」）の ISBN が入っていた。
+// 同じ ISBN を書名の違う本が持っているとき、国立国会図書館でその ISBN の巻を確かめ、巻が合わない本を自分の巻の版（ISBN・表紙・刊行年）に直す。
+// 端末ごとに 1 回（ui.isbnRepair）。直した本は同期でもう一方の端末へ。つながらなかったときは次に開いたときにもう一度
+const ISBN_REPAIR = 1;
+const workVol = (w) => volumeNumber(w.volume) || splitVolume(w.main || w.title).vol || 0;
+const sameVol = (a, b) => a === b || (!a && b === 1) || (a === 1 && !b); // 巻数のない本は 1 巻目
+async function repairSharedIsbns() {
+  if ((ui.isbnRepair || 0) >= ISBN_REPAIR) return;
+  const by = new Map();
+  for (const b of store.books()) {
+    const i = cleanIsbn(b.isbn);
+    if (!/^97[89]\d{10}$/.test(i)) continue;
+    if (!by.has(i)) by.set(i, []);
+    by.get(i).push(b);
+  }
+  let failed = false;
+  for (const [isbn, list] of by) {
+    if (new Set(list.map((b) => normTitle(b.title))).size < 2) continue;
+    try {
+      const w = await ndl.searchIsbn(isbn);
+      if (!w) continue;
+      const vol = workVol(w);
+      for (const b of list) {
+        const { base, vol: own } = splitVolume(b.title);
+        if (sameVol(own, vol)) continue; // この本の ISBN
+        const works = await ndl.searchTitle(base, b.author);
+        const right = works.filter((x) => !x.isComic && x.latest?.isbn && x.latest.isbn !== isbn
+          && normTitle(splitVolume(x.main || x.title).base) === normTitle(base) && sameVol(own, workVol(x)))
+          .sort((x, y) => (y.latest.publishedAt || '').localeCompare(x.latest.publishedAt || ''))[0];
+        if (!right) continue;
+        store.update(b.id, {
+          isbn: right.latest.isbn, coverIsbns: [...right.editions].reverse().map((e) => coverIsbn(e.isbn)).filter(Boolean), coverIsbn: '',
+          year: right.firstYear ? String(right.firstYear) : b.year, publishedAt: right.latest.publishedAt || publicationDate(right.latest.issued) || '',
+          publisher: right.latest.publisher || b.publisher, format: right.latest.format || b.format,
+        });
+      }
+    } catch { failed = true; }
+  }
+  if (!failed) { ui.isbnRepair = ISBN_REPAIR; saveUi(); }
+}
+
 // ---------------------------------------------------------------- 起動
 store.load();
 window.addEventListener('hashchange', onHash);
 onHash();
 try { noteTrophies(); } catch { /* 数えられなくても動く */ }
+setTimeout(() => { repairSharedIsbns().catch(() => {}); }, 2500); // v0.17.1：別の巻の ISBN を持つ本を直す（端末ごとに 1 回）
 store.fillMissingReadDates(); // v0.15.1：写真から取り込んだ読了の本などに、だいたいの読了日を振る（端末ごとに 1 回。同期でもう一方へ）
 store.syncShelfFollows(authorCounts().map(([a])=>a));
 updateBadge();

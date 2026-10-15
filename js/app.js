@@ -444,7 +444,7 @@ const openSeries = new Set(); // 巻を開いているシリーズ（この起�
 let showDoneSeries = false;
 const seriesStrip = (d) => `<span class="series-strip${d.vols.length > 40 ? ' dense' : ''}" aria-hidden="true">${d.vols.map((v) => `<i class="ss-${volState(v)}"></i>`).join('')}</span>`;
 function seriesCard(d) {
-  const lead = d.next || d.vols[d.vols.length - 1];
+  const lead = d.vols[0]; // 表紙は 1 巻目にそろえる（v0.18.1 本人）
   const leadCover = lead.book ? cover(lead.book.title, lead.book.isbn, 's', lead.book.coverIsbns || lead.book.coverIsbn || [], d.author)
     : cover(lead.title, lead.isbn, 's', lead.coverIsbns || [], d.author);
   const open = openSeries.has(d.key);
@@ -489,7 +489,7 @@ function drawSeries() {
   const going = list.filter((d) => d.next);
   const finished = list.filter((d) => !d.next);
   $('#series-count').textContent = list.length ? `続きあり ${going.length}・読み終えた ${finished.length}` : '0シリーズ';
-  const progress = seriesLoading ? `シリーズを国立国会図書館で確かめています（${seriesLoading.total}件中${seriesLoading.done}件）…` : '';
+  const progress = ''; // v0.18.1 本人：読み込みの表示は出さない（国立国会図書館で確かめる間も、分かっている分だけ並べる）
   const showDone = searching || showDoneSeries || !going.length;
   // シリーズがすでに並んでいるときは、確かめている途中の表示を下に小さく出す（上の一覧を押し下げない）
   box.innerHTML = `${progress && !list.length ? loading(progress) : ''}
@@ -501,6 +501,7 @@ function drawSeries() {
     ${progress && list.length ? `<p class="muted small series-checking">${esc(progress)}</p>` : ''}
     ${seriesFailed.size && !seriesLoading ? errorBox('一部のシリーズは国立国会図書館に接続できず、本棚にある巻だけを表示しています。') : ''}
     <p class="source">本棚の本、国立国会図書館サーチの書誌（巻数・シリーズ名）、よく知られたシリーズの一覧から、同じ著者のシリーズをまとめています。違うときは本の詳細の「シリーズ」で直せます。</p>`;
+  box.toggleAttribute('data-loading', !!seriesLoading); // 確かめている途中の印（画面には出さない。確認用）
   prepareBooks(box);
 }
 
@@ -1216,7 +1217,7 @@ function drawNewReleases() {
 
 // 持っていない本：本の多い著者から順に、国会図書館で著作を調べて本棚にないものを出す（スクロールで続き）
 const UNOWNED_STEP = 4;
-const unowned = { works: new Map(), failed: new Set(), shown: UNOWNED_STEP, running: null };
+const unowned = { works: new Map(), failed: new Set(), shown: UNOWNED_STEP, running: null, open: new Set() }; // open：「ほかの n 冊も見る」で広げた著者
 let unownedObserver = null;
 const unownedHideKey = (w, name) => `${w.key}|${normName(name)}`;
 function unownedWorks(name, works) {
@@ -1242,8 +1243,8 @@ function drawUnowned() {
     const rows = unownedWorks(name, works);
     rows.forEach((w) => workCache.set(w.key, w));
     return `<section class="unowned-author">${head}<span>本棚 ${count}冊・持っていない本 ${rows.length}冊</span></div>
-      ${rows.length ? `<ul class="books">${rows.slice(0, 4).map((w) => workRow(w, null, '登録', { hideKey: unownedHideKey(w, name) })).join('')}</ul>
-        ${rows.length > 4 ? `<button type="button" class="ghost small more-works" data-act="author" data-name="${esc(name)}">ほかの${rows.length - 4}冊も見る</button>` : ''}`
+      ${rows.length ? `<ul class="books">${(unowned.open.has(name) ? rows : rows.slice(0, 4)).map((w) => workRow(w, null, '登録', { hideKey: unownedHideKey(w, name) })).join('')}</ul>
+        ${rows.length > 4 && !unowned.open.has(name) ? `<button type="button" class="ghost small more-works" data-act="unowned-more" data-name="${esc(name)}">ほかの${rows.length - 4}冊も見る</button>` : ''}`
       : '<p class="muted small">持っていない本は見つかりませんでした。</p>'}
     </section>`;
   }).join('');
@@ -1375,9 +1376,8 @@ function drawCalendar() {
       ${calDayList(weekItems, 'この週の発売', 'この週に発売日が分かっている本はありません。')}
       ${months.map((mo) => undatedList(items, mo)).join('')}`;
   }
-  // 著者の新刊を集めている間は、まだ増えることが分かるように上に出す（v0.15 本人：1 冊だけ？）
-  const note = checking ? `<p class="cal-checking">新刊を集めています（${checking.done} / ${checking.total}人）。しばらくすると増えていきます。</p>` : '';
-  box.innerHTML = `${switcher}${note}${body}
+  // 新刊を集めている途中の表示は出さない（v0.18.1 本人：読み込みは裏で。集まったら描き直す）
+  box.innerHTML = `${switcher}${body}
     <p class="source">フォロー中の著者（本棚の著者）の新刊、本棚のシリーズの新しい巻、本棚に登録した発売予定の本。日付は出版社の近刊情報（国立国会図書館サーチ）です。</p>`;
 }
 
@@ -1418,18 +1418,21 @@ function renderAuthor(name) {
   const token = ++renderToken;
   // 著書を開いたら、確かめてから時間のたった著者をすべて確かめる（起動時は一部だけ。端末ごとに新刊・カレンダーの冊数がずれないように）
   if (!name) { renderAuthorHome(); hydrateReleaseCovers().finally(() => { if (route.name === 'author' && !route.arg) checkReleases(staleFollows()); }); return; }
+  // v0.18.1 本人：読み込みの表示で待たせない。著書の「持っていない本」などで読み込み済みの作品はすぐ出し、裏で確かめ直す
+  const cached = (lastAuthor?.name === name && lastAuthor.works) || unowned.works.get(name) || null;
   view.innerHTML = `
     <section>
       <a class="back-link" href="#author">‹ 著書</a>
-      <div id="author-result">${loading(`${name} の作品を国立国会図書館サーチで調べています…`)}</div>
+      <div id="author-result">${cached ? '' : `<div class="result-head"><div class="result-title"><h2 class="result-name">${esc(name)}</h2></div></div>`}</div>
     </section>`;
+  if (cached) drawAuthorResult(name, cached);
   ndl.searchAuthor(name).then((works) => {
     if (token !== renderToken) return;
     lastAuthor = { name, works };
-    drawAuthorResult(name, works);
+    if (!cached || works.length !== cached.length) drawAuthorResult(name, works);
   }).catch((e) => {
-    if (token !== renderToken) return;
-    $('#author-result').innerHTML = errorBox(e.message);
+    if (token !== renderToken || cached) return;
+    $('#author-result').insertAdjacentHTML('beforeend', errorBox(e.message));
   });
 }
 
@@ -1900,7 +1903,7 @@ function drawZukan() {
   const authors = zukanAuthors();
   const author = path.author ? authors.find((a) => normName(a.name) === normName(path.author)) : null;
   const d = author && path.key ? author.series.find((x) => x.key === path.key) : null;
-  const checking = zukanLoading ? `<p class="muted small zukan-checking">国立国会図書館でシリーズの巻を確かめています（${zukanLoading.total}件中${zukanLoading.done}件）</p>` : '';
+  const checking = ''; // v0.18.1 本人：読み込みの表示は出さない（確かめた分から増えていく）
   let html;
   if (d) {
     const pages = [];
@@ -1936,6 +1939,7 @@ function drawZukan() {
       ${checking}`;
   }
   box.innerHTML = html;
+  box.toggleAttribute('data-loading', !!zukanLoading); // 確かめている途中の印（画面には出さない。確認用）
   revealBooks(box);
 }
 const drawZukanSoon = () => { if (!zukanDrawTimer) zukanDrawTimer = setTimeout(drawZukan, 700); };
@@ -2406,6 +2410,8 @@ function render() {
   else if (name === 'search') renderSearch();
   else if (name === 'stats') renderStats();
   else renderShelf();
+  // 入力中に画面を描き直して入力欄が入れ替わると、閉じた合図が来ずに下のナビが隠れたままになる（v0.18.1）
+  setTimeout(() => { if (!isTypingField(document.activeElement)) document.body.classList.remove('typing'); }, 80);
 }
 
 function onHash() {
@@ -2694,6 +2700,7 @@ const actions = {
     if (r) addFromRelease(r);
     if (daySheet && sheet.open) renderCalendarDay(daySheet.date); // カレンダーの日付の画面は「本棚の記録を開く」に替える
   },
+  'unowned-more': (el) => { unowned.open.add(el.dataset.name); const y = window.scrollY; drawUnowned(); window.scrollTo(0, y); },
   'author-mode': (el) => { ui.authorMode = el.dataset.v; saveUi(); renderAuthorHome(); window.scrollTo(0, 0); },
   'cal-view': (el) => { ui.calView = el.dataset.v; saveUi(); drawCalendar(); },
   'cal-today': () => { ui.calMonth = ''; ui.calWeek = ''; saveUi(); drawCalendar(); },
@@ -3061,6 +3068,13 @@ const navDrop = (e) => {
 tabbar.addEventListener('pointerup', navDrop);
 tabbar.addEventListener('pointercancel', navDrop);
 tabbar.addEventListener('click', (e) => { if (navSuppressClick) { e.preventDefault(); e.stopPropagation(); navSuppressClick = false; } }, true);
+// v0.18.1 本人：一番下まで来たときに、いまの画面のタブ（本棚・著書など）を押すと一番上へ戻る
+tabbar.addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab || route.name !== tab.dataset.tab || route.arg) return;
+  e.preventDefault();
+  window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+});
 
 // ---------------------------------------------------------------- 別の巻の ISBN を直す（v0.17.1 本人：invert の表紙・年が invert 2 のものだった）
 // 最初に作った本棚の表で「invert」に「invert 2」（国立国会図書館では書名「invert」巻次「2」）の ISBN が入っていた。

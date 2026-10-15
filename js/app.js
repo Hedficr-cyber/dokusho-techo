@@ -363,7 +363,7 @@ function renderShelf() {
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id,label])=>`<button type="button" class="shelf-mode ${ui.sort===id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort===id}">${label}</button>`).join('')}
     </div>
-    <div class="shelf-pane">
+    <div class="shelf-pane swipe-pane">
     <label class="search-wrap shelf-search">${icon('search')}<span class="sr-only">本棚を検索</span><input id="shelf-q" type="search" placeholder="本棚を検索" value="${esc(ui.q)}" autocomplete="off"></label>
     ${ui.sort==='genre' ? `<div class="shelf-genres" role="group" aria-label="本棚のジャンル">${genreButtons.map(([id,label])=>`<button type="button" class="genre-filter ${ui.genre===id ? 'on' : ''}" data-act="shelf-filter-genre" data-v="${id}" aria-pressed="${ui.genre===id}">${esc(label)}</button>`).join('')}</div>` : ''}
     ${['year','added'].includes(ui.sort) ? `<div class="shelf-direction" role="group" aria-label="${ui.sort==='year' ? '刊行日' : '登録日'}の並び順">${[['desc',ui.sort==='year' ? '新しい順' : '新しく登録した順'],['asc',ui.sort==='year' ? '古い順' : '古く登録した順']].map(([id,label])=>`<button type="button" data-act="shelf-direction" data-v="${id}" class="direction-btn ${direction===id ? 'on' : ''}" aria-pressed="${direction===id}">${label}<span class="sr-only">（${id==='asc' ? '昇順' : '降順'}）</span></button>`).join('')}</div>` : ''}
@@ -437,16 +437,23 @@ function seriesList() {
 }
 const ownedCount = (d) => d.vols.filter((v) => v.book).length;
 
+// v0.18 本人「シリーズが長くて下まで行くのが大変」「50巻あったら50巻まで並ぶのはダサい」：
+// カードは表紙・書名・読了数と、巻の並びを細い帯（1 巻 1 本・色で状態）で見せるだけにし、巻のボタンは「巻を見る」で開いたときだけ。
+// 巻数のシリーズの巻は数字だけの小さなマスで並べる。読み終えたシリーズは下にまとめて畳む
+const openSeries = new Set(); // 巻を開いているシリーズ（この起動中だけ）
+let showDoneSeries = false;
+const seriesStrip = (d) => `<span class="series-strip${d.vols.length > 40 ? ' dense' : ''}" aria-hidden="true">${d.vols.map((v) => `<i class="ss-${volState(v)}"></i>`).join('')}</span>`;
 function seriesCard(d) {
   const lead = d.next || d.vols[d.vols.length - 1];
   const leadCover = lead.book ? cover(lead.book.title, lead.book.isbn, 's', lead.book.coverIsbns || lead.book.coverIsbn || [], d.author)
     : cover(lead.title, lead.isbn, 's', lead.coverIsbns || [], d.author);
+  const open = openSeries.has(d.key);
   const folded = d.named && d.vols.length > SERIES_CHIPS && !expandedSeries.has(d.key);
   const shown = folded ? d.vols.slice(0, SERIES_CHIPS) : d.vols;
-  const chips = shown.map((v) => {
+  const chips = !open ? '' : shown.map((v) => {
     const st = volState(v);
     const label = d.named ? `${v.vol}. ${v.title}` : `${v.vol}巻`;
-    const inner = d.named ? `<span class="vol-number">${v.vol}</span><span class="vol-name">${esc(mainTitle(v.title))}</span>` : `<span class="vol-number">${v.vol}</span><span class="vol-unit">巻</span>`;
+    const inner = d.named ? `<span class="vol-number">${v.vol}</span><span class="vol-name">${esc(mainTitle(v.title))}</span>` : `<span class="vol-number">${v.vol}</span>`;
     return `<li><button type="button" class="vol vol-${st}${d.named ? ' vol-named' : ''}" data-act="series-vol" data-key="${esc(d.key)}" data-vol="${v.vol}" aria-label="${esc(label)}：${VOL_STATE[st]}${st==='done' ? '、タップで読了を取り消す' : v.upcoming && !v.book ? '' : '、タップで読了'}" aria-pressed="${st==='done'}" ${v.upcoming && !v.book ? 'disabled' : ''}>${inner}</button></li>`;
   }).join('') + (d.named && d.vols.length > SERIES_CHIPS
     ? `<li><button type="button" class="vol vol-more" data-act="series-more" data-key="${esc(d.key)}" aria-expanded="${!folded}">${folded ? `ほか${d.vols.length - shown.length}冊` : '畳む'}</button></li>` : '');
@@ -459,16 +466,17 @@ function seriesCard(d) {
   const latest = d.coming.find((v) => v !== n);
   const action = n && !n.book && (n.work || d.named) ? `<button type="button" class="add-btn" data-act="series-add" data-key="${esc(d.key)}" data-vol="${n.vol}">＋登録</button>`
     : n?.book ? `<button type="button" class="ghost small" data-act="open" data-id="${esc(n.book.id)}">開く</button>` : '';
-  return `<li class="series-card${d.named ? ' named' : ''}" data-reveal-key="${esc(`series:${d.key}`)}">
+  return `<li class="series-card${d.named ? ' named' : ''}${open ? ' open' : ''}" data-reveal-key="${esc(`series:${d.key}`)}">
     <div class="series-head">${leadCover}
       <div class="series-main">
         <h2 class="series-title">${esc(d.base)}</h2>
         <button type="button" class="link series-author" data-act="author" data-name="${esc(d.author)}">${esc(d.author)}</button>
-        <p class="series-progress">読了 <b>${d.done}</b> / ${d.total}${d.named ? '冊' : '巻'}</p>
-        <div class="series-bar" aria-hidden="true"><i style="width:${d.total ? Math.round((d.done / d.total) * 100) : 0}%"></i></div>
+        <div class="series-progress-row"><p class="series-progress">読了 <b>${d.done}</b> / ${d.total}${d.named ? '冊' : '巻'}</p>
+          <button type="button" class="series-toggle" data-act="series-open" data-key="${esc(d.key)}" aria-expanded="${open}">${open ? '巻を閉じる' : '巻を見る'}</button></div>
+        ${seriesStrip(d)}
       </div>
     </div>
-    <ol class="series-vols" aria-label="${esc(d.base)}の${d.named ? '本' : '巻'}">${chips}</ol>
+    ${open ? `<ol class="series-vols${d.named ? '' : ' compact'}" aria-label="${esc(d.base)}の${d.named ? '本' : '巻'}">${chips}</ol>` : ''}
     <div class="series-next"><p>${next}${latest ? `<br><span class="muted">最新刊：${esc(volName(d, latest))} ${esc(releaseDay(latest))}発売予定</span>` : ''}</p>${action}</div>
   </li>`;
 }
@@ -477,12 +485,18 @@ function drawSeries() {
   const box = $('#series-list');
   if (!box) return;
   const list = seriesList();
-  $('#series-count').textContent = `${list.length}シリーズ`;
+  const searching = !!normName(ui.q);
+  const going = list.filter((d) => d.next);
+  const finished = list.filter((d) => !d.next);
+  $('#series-count').textContent = list.length ? `続きあり ${going.length}・読み終えた ${finished.length}` : '0シリーズ';
   const progress = seriesLoading ? `シリーズを国立国会図書館で確かめています（${seriesLoading.total}件中${seriesLoading.done}件）…` : '';
+  const showDone = searching || showDoneSeries || !going.length;
   // シリーズがすでに並んでいるときは、確かめている途中の表示を下に小さく出す（上の一覧を押し下げない）
   box.innerHTML = `${progress && !list.length ? loading(progress) : ''}
-    ${list.length ? `<ul class="series-list">${list.map(seriesCard).join('')}</ul>
-      <p class="series-legend"><span><i class="vol vol-done"></i>読了</span><span><i class="vol vol-shelf"></i>本棚</span><span><i class="vol vol-missing"></i>まだ本棚にない</span><span><i class="vol vol-coming"></i>発売予定</span></p>`
+    ${list.length ? `${going.length ? `<ul class="series-list">${going.map(seriesCard).join('')}</ul>` : ''}
+      ${finished.length && !searching && going.length ? `<button type="button" class="series-done-toggle" data-act="series-done" aria-expanded="${showDone}">${showDone ? '読み終えたシリーズを畳む' : `読み終えたシリーズ（${finished.length}）を見る`}</button>` : ''}
+      ${finished.length && showDone ? `<ul class="series-list series-list-done">${finished.map(seriesCard).join('')}</ul>` : ''}
+      <p class="series-legend"><span><i class="ss-done"></i>読了</span><span><i class="ss-shelf"></i>本棚にある</span><span><i class="ss-missing"></i>まだ本棚にない</span><span><i class="ss-coming"></i>発売予定</span></p>`
     : seriesLoading ? '' : `<div class="empty"><p class="empty-title">シリーズの本が見つかりません</p><p>書名に巻数がある本（例：「変な家2」）や、題名が違っても同じシリーズの本（例：館シリーズ、ガリレオシリーズ）をまとめます。本の詳細の「シリーズ」から自分でまとめることもできます。</p></div>`}
     ${progress && list.length ? `<p class="muted small series-checking">${esc(progress)}</p>` : ''}
     ${seriesFailed.size && !seriesLoading ? errorBox('一部のシリーズは国立国会図書館に接続できず、本棚にある巻だけを表示しています。') : ''}
@@ -496,7 +510,7 @@ function renderSeriesShelf() {
     <div class="shelf-tabs" role="group" aria-label="本棚の並べ方">
       ${SHELF_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${ui.sort === id ? 'on' : ''}" data-act="shelf-mode" data-v="${id}" aria-pressed="${ui.sort === id}">${label}</button>`).join('')}
     </div>
-    <div class="shelf-pane">
+    <div class="shelf-pane swipe-pane">
     <label class="search-wrap shelf-search">${icon('search')}<span class="sr-only">シリーズを検索</span><input id="shelf-q" type="search" placeholder="シリーズを検索" value="${esc(ui.q)}" autocomplete="off"></label>
     <div class="shelf-bar"><div class="shelf-caption"><span>シリーズの続き</span><p class="count" id="series-count" aria-live="polite"></p></div></div>
     <div id="series-list"></div>
@@ -889,7 +903,7 @@ function renderBookPreview(book,origin) {
   const state={book,...origin,controller:new AbortController(),details:peekBookDetails(book),loading:false};
   preview=state;
   sheetBody.innerHTML=`<article class="book-preview">
-    <div class="detail-head">${cover(book.title,book.isbn,'m',book.coverIsbns || [],book.author)}<div class="detail-title"><p class="preview-eyebrow">本の情報</p><h2>${esc(book.title)}</h2><p class="book-meta cover-caption" hidden></p>${book.publisher ? `<p class="muted">${esc(book.publisher)}</p>` : ''}</div></div>
+    <div class="detail-head${origin?.zukan ? ' unowned' : ''}">${cover(book.title,book.isbn,'m',book.coverIsbns || [],book.author)}<div class="detail-title"><p class="preview-eyebrow">${origin?.zukan ? 'まだ持っていない本' : '本の情報'}</p><h2>${esc(book.title)}</h2><p class="book-meta cover-caption" hidden></p>${book.publisher ? `<p class="muted">${esc(book.publisher)}</p>` : ''}</div></div>
     <dl class="preview-facts"><div><dt>著者</dt><dd>${book.author ? `<button type="button" class="link" data-act="author" data-name="${esc(book.author)}">${esc(book.author)}</button>` : '未確認'}</dd></div><div><dt>刊行日</dt><dd><span id="preview-date">${esc(publicationLabel(book.publishedAt))}</span>${book.firstYear ? `<span class="first-pub">最初の刊行は${esc(String(book.firstYear))}年</span>` : ''}</dd></div></dl>
     <section id="preview-summary" class="preview-summary" aria-labelledby="preview-summary-title" hidden><h3 id="preview-summary-title">あらすじ</h3><div id="preview-synopsis" aria-live="polite"></div></section>
     <p id="preview-source" class="preview-source"></p><div id="preview-action" class="preview-action"></div>
@@ -918,10 +932,8 @@ function previewRelease(raw) {
 
 // ---------------------------------------------------------------- バーコードで追加
 // 読み取った本を本棚に入れるか、本屋さんモード（入れずに持っているかを確かめる）か。最後に選んだ方をこの端末で覚える
-const SCAN_NOTE = {
-  add: '読み取った本は、読みたい本として本棚に入ります。',
-  check: '本屋さんモード：本棚には入れずに、持っているか・読んだか・シリーズの何巻目かを確かめます。',
-};
+// v0.18 本人「読み込んだ本がすぐ本棚に登録されるのをやめて」：読み取った本は本棚に入れず、持っているか・何巻目かを出し、
+// 入れたい本だけ「本棚に追加」（v0.16 の本屋さんモードと同じ。モードの切り替えはなくした）
 function renderSheetScan() {
   stopBookPreview();
   flushMemo();
@@ -930,11 +942,9 @@ function renderSheetScan() {
   scanController = controller;
   openId = null;
   scanned = [];
-  const check = ui.scanMode === 'check';
   sheetBody.innerHTML = `
     <h2 class="sheet-title">バーコード</h2>
-    <div class="seg scan-mode" role="group" aria-label="読み取った本を">${[['add', '本棚に追加'], ['check', '持ってるか確認']].map(([v, l]) => `<button type="button" class="seg-btn ${(check ? 'check' : 'add') === v ? 'on' : ''}" data-act="scan-mode" data-v="${v}" aria-pressed="${(check ? 'check' : 'add') === v}">${l}</button>`).join('')}</div>
-    <p class="scan-mode-note">${SCAN_NOTE[check ? 'check' : 'add']}</p>
+    <p class="scan-mode-note">読み取った本は、まだ本棚に入りません。持っているか・読んだか・シリーズの何巻目かを確かめて、入れたい本だけ「本棚に追加」を押してください。</p>
     <div class="scan-box">
       <video id="scan-video" playsinline muted autoplay></video>
       <div class="scan-guide" aria-hidden="true"></div>
@@ -942,9 +952,11 @@ function renderSheetScan() {
     <p id="scan-msg" class="scan-msg">カメラを起動しています…</p>
     <form id="isbn-form" class="search-bar" autocomplete="off">
       <input id="isbn-input" inputmode="numeric" placeholder="ISBNを手入力（978から始まる13桁）" enterkeyhint="done">
-      <button type="submit" class="primary">${check ? '確認' : '追加'}</button>
+      <button type="submit" class="primary">調べる</button>
     </form>
+    <button type="button" class="link scan-search-link" data-act="scan-to-search">バーコードがない本は、書名・著者で探す</button>
     <h3 class="sub">読み取った本 <span class="muted" id="scan-count">0冊</span></h3>
+    <div id="scan-bulk"></div>
     <ul class="books" id="scan-list"></ul>`;
   showSheet();
   const video = $('#scan-video');
@@ -965,7 +977,10 @@ function renderSheetScan() {
 function drawScanned() {
   const list = $('#scan-list');
   if (!list) return;
-  $('#scan-count').textContent = `${scanned.filter((s) => (s.check ? s.state !== 'undone' : s.state === 'added')).length}冊`;
+  $('#scan-count').textContent = `${scanned.filter((s) => s.state !== 'undone').length}冊`;
+  const addable = scanned.filter((s) => s.check && s.state === 'new');
+  const bulk = $('#scan-bulk');
+  if (bulk) bulk.innerHTML = addable.length >= 2 ? `<button type="button" class="ghost small scan-add-all" data-act="scan-add-all">持っていない${addable.length}冊をまとめて本棚に追加</button>` : '';
   list.innerHTML = scanned.map((s) => {
     if (s.check && s.state !== 'added' && s.state !== 'undone') return checkRow(s);
     const b = s.bookId ? store.get(s.bookId) : null;
@@ -995,56 +1010,11 @@ function drawScanned() {
   }).join('');
 }
 
-async function handleIsbn(isbn) {
+// 読み取った本（手入力の ISBN も）：v0.18 から本棚には入れず、持っているか・何巻目かを確かめるだけ（checkIsbn）
+function handleIsbn(isbn) {
   if (scanned.some((s) => s.isbn === isbn && !['undone', 'error'].includes(s.state))) return;
   navigator.vibrate?.(40);
-  if (ui.scanMode === 'check') { checkIsbn(isbn); return; }
-  const owned = store.books().find((b) => (b.isbn || '').replace(/-/g, '') === isbn);
-  const status = 'want'; // 読み取った本はすべて本棚へ（読了などは本の詳細で変える）
-  const session = scanController;
-  const entry = { isbn, state: owned ? 'owned' : 'loading', bookId: owned?.id || '' };
-  scanned = [entry, ...scanned.filter((s) => s.isbn !== isbn)];
-  drawScanned();
-  if (owned) return;
-  try {
-    // まず openBD で書名・著者を出して本棚に入れる（すぐ返る）。国立国会図書館の書誌は裏で足す
-    const quick = await ndl.openBdSummary(isbn, { signal: session?.signal });
-    if (session?.signal.aborted || session !== scanController) return;
-    if (quick) {
-      const title = quick.title + (quick.volume && !quick.title.includes(quick.volume) ? ` ${quick.volume}` : '');
-      const same = store.books().find((b) => normTitle(b.title) === normTitle(title) && normName(b.author) === normName(quick.author));
-      if (same) { entry.state = 'owned'; entry.bookId = same.id; }
-      else {
-        const b = store.add({ title, author: quick.author, status, priority: 2, source: 'scan', isbn, publisher: quick.publisher, year: quick.year, publishedAt: quick.publishedAt });
-        entry.state = 'added'; entry.bookId = b.id;
-        enrichScanned(b.id, isbn);
-      }
-      drawScanned();
-      return;
-    }
-    const w = await ndl.searchIsbn(isbn);
-    if (session?.signal.aborted || session !== scanController) return;
-    const sameWork = w && shelfIndex()(w); // 単行本と文庫のように ISBN が違っても同じ作品なら足さない
-    if (!w) {
-      entry.state = 'notfound';
-    } else if (sameWork) {
-      entry.state = 'owned';
-      entry.bookId = sameWork.id;
-    } else {
-      const b = store.add({
-        title: w.main + (w.volume ? ` ${w.volume}` : ''), author: w.authorLabel.split('、')[0] || '',
-        status, priority: 2, source: 'scan', isbn,
-        publisher: w.latest?.publisher || '', year: w.firstYear ? String(w.firstYear) : '',
-        format: w.latest?.format || '', ndc: w.ndc || '', ndl: w.latest?.link || '',
-      });
-      entry.state = 'added';
-      entry.bookId = b.id;
-    }
-  } catch (e) {
-    entry.state = 'error';
-    entry.msg = e.message;
-  }
-  drawScanned();
+  checkIsbn(isbn);
 }
 
 // ---------------------------------------------------------------- 本屋さんモード（v0.16 本人の⑥：本屋でバーコードを読むと、本棚に入れずに「持ってるか」を確かめる）
@@ -1108,6 +1078,13 @@ function scanSeriesHint({ title, author, isbn }) {
   return { readByAuthor, d, series: d.base, named: d.named, vol, done: mine ? d.done : 0, unreadBefore: before.filter((x) => x.book?.status !== 'done') };
 }
 
+// 読み取った本を、読みたい本として本棚へ（本人が「本棚に追加」を押したときだけ）
+function addScanned(s) {
+  if (!s || s.state !== 'new') return;
+  const b = store.add({ title: s.title, author: s.author, status: 'want', priority: 2, source: 'scan', isbn: s.isbn, ...(s.extra || {}) });
+  Object.assign(s, { state: 'added', bookId: b.id });
+  enrichScanned(b.id, s.isbn);
+}
 function checkRow(s) {
   const b = s.bookId ? store.get(s.bookId) : null;
   const title = b?.title || s.title || `ISBN ${s.isbn}`;
@@ -1131,8 +1108,8 @@ function checkRow(s) {
       else if (h.unreadBefore.length) lines.push(`前の巻でまだ読んでいない：${h.unreadBefore.slice(0, 2).map((x) => volName(h.d, x)).join('・')}${h.unreadBefore.length > 2 ? ` ほか${h.unreadBefore.length - 2}冊` : ''}`);
       else lines.push('前の巻はすべて読了。次に読む巻です');
     } else if (h.readByAuthor) lines.push(`${s.author}の本は${h.readByAuthor}冊読了`);
-    right = `<button type="button" class="add-btn" data-act="scan-check-add" data-isbn="${esc(s.isbn)}">読みたいに追加</button>`;
-  } else if (s.state === 'notfound') { tone = 'none'; verdict = '見つからない'; lines.push('書誌が見つかりませんでした'); }
+    right = `<button type="button" class="add-btn" data-act="scan-check-add" data-isbn="${esc(s.isbn)}">本棚に追加</button>`;
+  } else if (s.state === 'notfound') { tone = 'none'; verdict = '見つからない'; lines.push('書誌が見つかりませんでした'); right = `<button type="button" class="add-btn" data-act="scan-add-raw" data-isbn="${esc(s.isbn)}">ISBNだけで追加</button>`; }
   else if (s.state === 'error') { tone = 'none'; verdict = '確かめられない'; lines.push(s.msg || '通信できませんでした'); }
   return `<li class="book work check-row check-${tone}">${cover(title, s.isbn)}
     <div class="book-main">${verdict ? `<span class="check-verdict">${esc(verdict)}</span>` : ''}<div class="book-title">${esc(title)}</div>
@@ -1172,7 +1149,7 @@ const localTime = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-const AUTHOR_MODES = [['new', '新刊'], ['unowned', '持っていない本'], ['calendar', 'カレンダー']];
+const AUTHOR_MODES = [['unowned', '持っていない本'], ['new', '新刊'], ['calendar', 'カレンダー']]; // v0.18 本人：持っていない本を先に
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const releaseDate = (r) => (r.publishedAt?.length === 10 ? r.publishedAt : '');
 const isUpcoming = (r) => { const d = releaseDate(r); return d ? d > today() : r.month > today().slice(0, 7); };
@@ -1205,7 +1182,7 @@ function renderAuthorHome() {
   view.innerHTML = `<section class="works-page works-${mode}">
     ${pageHead('著書', authors ? `本棚の著者 ${authors}人` : '')}
     <div class="shelf-tabs" role="group" aria-label="著書の表示">${AUTHOR_MODES.map(([id, label]) => `<button type="button" class="shelf-mode ${mode === id ? 'on' : ''}" data-act="author-mode" data-v="${id}" aria-pressed="${mode === id}">${label}</button>`).join('')}</div>
-    <div id="works-body"></div>
+    <div id="works-body" class="swipe-pane"></div>
   </section>`;
   if (mode === 'unowned') drawUnowned();
   else if (mode === 'calendar') drawCalendar();
@@ -2451,6 +2428,8 @@ store.subscribe((ev) => {
   if (['change','sync','external'].includes(ev.type)) syncShelfAuthors(); // 本が増減したら、本棚の著者のフォローをそろえる
   if (ev.type === 'change' || ev.type === 'preferences') scheduleSync(); // 自分で変えたときだけ同期する（同期で届いた変更は送り返さない）
   updateBadge();
+  // 左右に払っている最中・切り替えの途中は描き直さず、終わってから（v0.18：著書の画面が裏で描き直されて、払った指が外れていた）
+  if ((shelfSwipe || shelfSliding || paneAnimating) && ['shelf', 'author'].includes(route.name)) { swipeDeferred = true; return; } // 指が触れている間も（払い始めで外れないように）
   // 裏の新刊確認・表紙の補充・自動フォローは、著書の画面だけ描き直す（本棚を見ている最中に一覧を作り直さない）
   if (['release-covers', 'releases', 'follows'].includes(ev.type)) { if (route.name==='author' && !route.arg) renderAuthorHome(); return; }
   if (route.name === 'author' && !route.arg) { renderAuthorHome(); return; }
@@ -2502,6 +2481,12 @@ const actions = {
     if (!name || name === NO_SERIES) { toast('シリーズ名を入れてください'); $('#f-series')?.focus(); return; }
     setSeriesName(openId, name);
   },
+  'series-open': (el) => { // 巻を見る／閉じる（位置はそのまま）
+    const k = el.dataset.key;
+    if (openSeries.has(k)) openSeries.delete(k); else openSeries.add(k);
+    const y = window.scrollY; drawSeries(); window.scrollTo(0, y);
+  },
+  'series-done': () => { showDoneSeries = !showDoneSeries; const y = window.scrollY; drawSeries(); window.scrollTo(0, y); },
   'series-more': (el) => {
     const key = el.dataset.key;
     expandedSeries.has(key) ? expandedSeries.delete(key) : expandedSeries.add(key);
@@ -2641,7 +2626,8 @@ const actions = {
     }
     closeSheet();
   },
-  add: () => {
+  add: () => renderSheetScan(), // v0.18 本人：検索へ移らず、すぐバーコードを読む画面に（書名で探すのは画面の下から）
+  'scan-to-search': () => {
     closeSheet();
     if (route.name !== 'search') location.hash = '#search';
     setTimeout(() => $('#book-q')?.focus(), 80);
@@ -2651,26 +2637,8 @@ const actions = {
 
   // バーコード
   'open-scan': () => renderSheetScan(),
-  'scan-mode': (el) => {
-    ui.scanMode = el.dataset.v === 'check' ? 'check' : 'add';
-    saveUi();
-    const check = ui.scanMode === 'check';
-    document.querySelectorAll('[data-act="scan-mode"]').forEach((b) => { const on = b.dataset.v === ui.scanMode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
-    const note = $('.scan-mode-note');
-    if (note) note.textContent = SCAN_NOTE[ui.scanMode];
-    const submit = $('#isbn-form button[type="submit"]');
-    if (submit) submit.textContent = check ? '確認' : '追加';
-    scanned = [];
-    drawScanned();
-  },
-  'scan-check-add': (el) => {
-    const s = scanned.find((x) => x.isbn === el.dataset.isbn && x.check);
-    if (!s || s.state !== 'new') return;
-    const b = store.add({ title: s.title, author: s.author, status: 'want', priority: 2, source: 'scan', isbn: s.isbn, ...(s.extra || {}) });
-    Object.assign(s, { state: 'added', bookId: b.id });
-    enrichScanned(b.id, s.isbn);
-    drawScanned();
-  },
+  'scan-check-add': (el) => { addScanned(scanned.find((x) => x.isbn === el.dataset.isbn && x.check)); drawScanned(); },
+  'scan-add-all': () => { const list = scanned.filter((s) => s.check && s.state === 'new'); list.forEach(addScanned); drawScanned(); toast(`${list.length}冊を本棚に追加しました`); },
   kuji: () => renderKuji(),
   'kuji-draw': () => drawKuji(),
   'kuji-add': () => {
@@ -2940,9 +2908,18 @@ sheet.addEventListener('close', () => {
 // v0.17.2 本人「カクつく・残像が残る」：動かすのは並べ方のボタンより下の 1 枚（.shelf-pane）だけにし、指の動きは 1 コマに 1 回だけ反映する。
 // 透明度は変えない（iPhone で画像の多い面の透明度を変えると残像が出る）。横に払っている間は縦にスクロールさせない。
 // 切り替えるときは、今の並びを払った向きへ送り出してから、新しい並びを反対側から入れる（入れる間は本の浮かび上がりを止める）
+// v0.18 本人：著書（持っていない本・新刊・カレンダー）も同じように左右に払って切り替える
 let shelfSwipe = null;
 let shelfSliding = false;
-const shelfPane = () => document.querySelector('.shelf-pane');
+let swipeDeferred = false; // 払っている間に届いた本棚の変更（終わってから描き直す）
+let paneAnimating = false; // 新しい並びが入ってくる途中（描き直すと動きが途切れる）
+const flushSwipeRender = () => { if (!swipeDeferred || shelfSwipe || shelfSliding || paneAnimating) return; swipeDeferred = false; if (route.name === 'author' && !route.arg) renderAuthorHome(); else if (route.name === 'shelf') render(); };
+const shelfPane = () => document.querySelector('.swipe-pane');
+const SWIPERS = {
+  shelf: { modes: () => SHELF_MODES, get: () => ui.sort, set: (v) => { ui.sort = v; shelfLimit = 24; saveUi(); renderShelf(); } },
+  author: { modes: () => AUTHOR_MODES, get: () => (AUTHOR_MODES.some(([id]) => id === ui.authorMode) ? ui.authorMode : AUTHOR_MODES[0][0]), set: (v) => { ui.authorMode = v; saveUi(); renderAuthorHome(); } },
+};
+const swiper = () => (route.name === 'shelf' ? SWIPERS.shelf : route.name === 'author' && !route.arg ? SWIPERS.author : null);
 const PANE_EASE = 'cubic-bezier(.22,.8,.3,1)';
 function setPane(x, transition = 'none') {
   const el = shelfPane();
@@ -2952,22 +2929,31 @@ function setPane(x, transition = 'none') {
 }
 view.addEventListener('touchstart', (e) => {
   shelfSwipe = null;
-  if (route.name !== 'shelf' || e.touches.length !== 1 || sheet.open || shelfSliding) return;
-  if (!e.target.closest('.shelf-pane') || e.target.closest('input, textarea, select, .shelf-genres, .series-vols')) return;
+  if (!swiper() || e.touches.length !== 1 || sheet.open || shelfSliding) return;
+  // 並べ方のボタンより下なら、中身の短い画面の空いたところでも払える（v0.18）
+  if (!e.target.closest('#view') || e.target.closest('.page-head, .shelf-tabs, input, textarea, select, .shelf-genres, .series-vols, .cal-switch, .dp-grid')) return;
   const t = e.touches[0];
-  shelfSwipe = { x: t.clientX, y: t.clientY, dx: 0, on: false, raf: 0 };
+  // 動き・離したことは、指を置いた要素で受け取る（裏で一覧が描き直されて要素が外れても、払う動きが途切れない）
+  const target = e.target;
+  shelfSwipe = { x: t.clientX, y: t.clientY, dx: 0, on: false, raf: 0, target };
+  target.addEventListener('touchmove', onSwipeMove, { passive: false });
+  target.addEventListener('touchend', endShelfSwipe);
+  target.addEventListener('touchcancel', cancelShelfSwipe);
 }, { passive: true });
-view.addEventListener('touchmove', (e) => {
+const releaseSwipeTarget = (s) => { s?.target?.removeEventListener('touchmove', onSwipeMove); s?.target?.removeEventListener('touchend', endShelfSwipe); s?.target?.removeEventListener('touchcancel', cancelShelfSwipe); };
+function onSwipeMove(e) {
   const s = shelfSwipe;
   if (!s) return;
   const t = e.touches[0];
   s.dx = t.clientX - s.x;
   const dy = t.clientY - s.y;
   if (!s.on) {
-    if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(s.dx)) { shelfSwipe = null; return; } // 縦のスクロール
+    if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(s.dx)) { releaseSwipeTarget(s); shelfSwipe = null; flushSwipeRender(); return; } // 縦のスクロール
     if (Math.abs(s.dx) < 12 || Math.abs(s.dx) < Math.abs(dy) * 1.4) return;
     s.on = true;
-    s.idx = SHELF_MODES.findIndex(([id]) => id === ui.sort);
+    s.sw = swiper();
+    s.modes = s.sw.modes();
+    s.idx = s.modes.findIndex(([id]) => id === s.sw.get());
     s.w = shelfPane()?.offsetWidth || innerWidth;
     s.x += s.dx > 0 ? 12 : -12; // 動き出した位置から指につける（最初の 12px で跳ねない）
     s.dx = t.clientX - s.x;
@@ -2977,40 +2963,47 @@ view.addEventListener('touchmove', (e) => {
   if (!s.raf) s.raf = requestAnimationFrame(() => {
     s.raf = 0;
     if (shelfSwipe !== s) return;
-    const edge = (s.dx > 0 && s.idx === 0) || (s.dx < 0 && s.idx === SHELF_MODES.length - 1);
+    const edge = (s.dx > 0 && s.idx === 0) || (s.dx < 0 && s.idx === s.modes.length - 1);
     setPane(edge ? s.dx * 0.18 : s.dx); // 端の並べ方は少しだけ（それ以上はない合図）
   });
-}, { passive: false });
+}
 function endShelfSwipe() {
   const s = shelfSwipe;
+  releaseSwipeTarget(s);
   shelfSwipe = null;
-  if (!s?.on) return;
+  if (!s?.on) { flushSwipeRender(); return; }
   cancelAnimationFrame(s.raf);
   const dir = s.dx < 0 ? 1 : -1;
   const next = s.idx + dir;
-  if (Math.abs(s.dx) < Math.min(70, s.w * 0.18) || next < 0 || next >= SHELF_MODES.length) {
+  if (Math.abs(s.dx) < Math.min(70, s.w * 0.18) || next < 0 || next >= s.modes.length || swiper() !== s.sw) {
     setPane(0, `transform .3s ${PANE_EASE}`);
-    setTimeout(() => shelfPane()?.classList.remove('swiping'), 320);
+    setTimeout(() => { shelfPane()?.classList.remove('swiping'); flushSwipeRender(); }, 320);
     return;
   }
   shelfSliding = true;
+  paneAnimating = true;
+  swipeDeferred = false; // 新しい並びを描くので、待たせていた描き直しはいらない
   setPane(-dir * s.w, 'transform .17s cubic-bezier(.45,0,.9,.55)'); // 今の並びを送り出す
   setTimeout(() => {
-    ui.sort = SHELF_MODES[next][0]; shelfLimit = 24; saveUi();
-    renderShelf();
+    s.sw.set(s.modes[next][0]);
     const fresh = shelfPane();
-    if (!fresh) { shelfSliding = false; return; }
+    if (!fresh) { shelfSliding = false; paneAnimating = false; return; }
     fresh.classList.add('swiping', 'no-reveal');
     setPane(dir * s.w * 0.4);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       setPane(0, `transform .32s ${PANE_EASE}`);
       shelfSliding = false; // 入り始めたら、続けて次のスワイプを受け付ける（連続で払っても止まらない）
-      setTimeout(() => { fresh.classList.remove('no-reveal'); if (!shelfSwipe?.on) { fresh.classList.remove('swiping'); if (!fresh.style.transform) fresh.style.transition = ''; } }, 340);
+      setTimeout(() => { fresh.classList.remove('no-reveal'); paneAnimating = false; if (!shelfSwipe?.on) { fresh.classList.remove('swiping'); if (!fresh.style.transform) fresh.style.transition = ''; } flushSwipeRender(); }, 340);
     }));
   }, 170);
 }
-view.addEventListener('touchend', endShelfSwipe);
-view.addEventListener('touchcancel', () => { if (shelfSwipe?.on) { cancelAnimationFrame(shelfSwipe.raf); setPane(0, `transform .3s ${PANE_EASE}`); } shelfSwipe = null; });
+function cancelShelfSwipe() {
+  const s = shelfSwipe;
+  releaseSwipeTarget(s);
+  if (s?.on) { cancelAnimationFrame(s.raf); setPane(0, `transform .3s ${PANE_EASE}`); }
+  shelfSwipe = null;
+  setTimeout(flushSwipeRender, 320);
+}
 
 // ---------------------------------------------------------------- 下のナビ：ガラスの面を持って左右に動かし、離したタブへ（v0.17 本人の②）
 // 押さえたまま横に動かすと、ガラスの面が指について大きくなり、離したところのタブを開く。そのまま触れて離したときは普通のタップ
@@ -3113,6 +3106,18 @@ async function repairSharedIsbns() {
 
 // ---------------------------------------------------------------- 起動
 store.load();
+// v0.18 本人：ホーム画面のアプリを閉じて（消して）開き直したときは、前の画面ではなく本棚の著者順から。
+// 裏に回して戻ったとき・iPhone が裏で読み直したときは同じセッション（sessionStorage が残る）なので前の画面のまま。
+// ブラウザで開いたリンク（#stats/zukan など）や取り込みコードのリンクはそのまま開く
+(() => {
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  let resumed = false;
+  try { resumed = sessionStorage.getItem('dokusho-techo:open') === '1'; sessionStorage.setItem('dokusho-techo:open', '1'); } catch { resumed = true; }
+  if (!standalone || resumed || /^#stats\/import\//.test(location.hash)) return;
+  Object.assign(ui, { sort: 'author', q: '', genre: '' });
+  saveUi();
+  if (location.hash !== '#shelf') history.replaceState(null, '', '#shelf');
+})();
 window.addEventListener('hashchange', onHash);
 onHash();
 try { noteTrophies(); } catch { /* 数えられなくても動く */ }

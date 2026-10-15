@@ -945,7 +945,7 @@ button.trophy { width:100%; font:inherit; color:inherit; cursor:pointer; margin-
 .trophy-levels .zbar { width:70%; }
 
 /* v0.17 ① 本棚は左右に払って並べ方を切り替える（縦のスクロールはそのまま） ② 下のナビはガラスの面を持って左右に動かせる */
-.shelf { touch-action:pan-y; }
+.shelf, .works-page { touch-action:pan-y; }
 .tabbar { touch-action:none; -webkit-user-select:none; user-select:none; }
 .tabbar.dragging .tab-glider { transition:none; background:rgba(255,255,255,.62); box-shadow:inset 0 0 0 1px var(--glass-edge),0 8px 22px #27272e33,inset 0 2px 6px #ffffffb3; }
 .tabbar.dragging .tab.drag-over { color:var(--ink); }
@@ -955,5 +955,33 @@ button.trophy { width:100%; font:inherit; color:inherit; cursor:pointer; margin-
 /* v0.17.2 本人「スライドがカクつく・残像が残る」：並べ方のボタンより下の 1 枚だけを動かす。動かしている間だけ別の層に。
    切り替えて入ってくる間は、本が下から浮かび上がる動きを止める（二重の動きが残像に見えた）。はみ出した分で横にスクロールしない */
 .view { overflow-x:clip; } /* 動かした本棚は画面の端で切る（余白の線で切れて見えない・横にスクロールしない） */
-.shelf-pane.swiping { will-change:transform; }
-.shelf-pane.no-reveal .reveal-item { opacity:1 !important; transform:none !important; transition:none !important; }
+.swipe-pane.swiping { will-change:transform; }
+.swipe-pane.no-reveal .reveal-item { opacity:1 !important; transform:none !important; transition:none !important; }
+
+/* v0.18 ⑥ 本棚のシリーズ：カードは短く（巻は細い帯で）、巻のボタンは「巻を見る」で開いたときだけ。読み終えたシリーズは下に畳む */
+.series-card { padding:16px; }
+.series-head .series-main { min-width:0; flex:1; }
+.series-progress-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 6px; }
+.series-progress-row .series-progress { margin:0; }
+.series-toggle { flex-shrink:0; min-height:32px; padding:4px 12px; border:1px solid var(--line); border-radius:16px; background:transparent; color:var(--ink); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+.series-card.open .series-toggle { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+.series-strip { display:flex; gap:2px; height:8px; }
+.series-strip.dense { gap:1px; }
+.series-strip i, .series-legend i[class^="ss-"] { flex:1 1 0; min-width:2px; border-radius:2px; background:var(--line); }
+.series-strip .ss-done, .series-legend .ss-done { background:var(--ink); }
+.series-strip .ss-shelf, .series-legend .ss-shelf { background:var(--ink-2); opacity:.55; }
+.series-strip .ss-coming, .series-legend .ss-coming { background:repeating-linear-gradient(90deg,var(--ink-2) 0 2px,transparent 2px 4px); opacity:.6; }
+.series-legend i[class^="ss-"] { flex:none; width:16px; height:8px; display:inline-block; }
+.series-card .series-next { margin-top:12px; padding-top:12px; }
+.series-vols.compact { display:grid; grid-template-columns:repeat(auto-fill,minmax(36px,1fr)); gap:6px; }
+.series-vols.compact button.vol { min-width:0; width:100%; height:44px; padding:0; border-radius:10px; }
+.series-vols.compact button.vol .vol-number { font-size:14px; }
+.series-done-toggle { display:block; width:100%; margin:14px 0 0; min-height:46px; border:1px dashed var(--line); border-radius:16px; background:transparent; color:var(--ink-2); font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.series-list-done { margin-top:14px; }
+
+/* v0.18 ① 図鑑から開いた、まだ持っていない本の詳細：表紙は薄く（触れて広げた表紙は色そのまま） */
+.detail-head.unowned > .cover { opacity:.5; filter:saturate(.5); }
+
+/* v0.18 ⑤ 中身の短い画面（著書の新刊など）でも、払ったときに 1 枚として動く */
+.swipe-pane { min-height:55dvh; }
+.works-page { touch-action:pan-y; }

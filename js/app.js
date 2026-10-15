@@ -1,3 +1,9 @@
+// よそのサイトの中に埋め込まれて開かれたときは、画面を出さず動かさない（クリックジャッキング対策。
+// GitHub Pages ではヘッダーで埋め込みを禁じられないため。セキュリティ点検 2026-10-16）
+if (window.top !== window.self) {
+  document.documentElement.style.display = 'none';
+  throw new Error('読書手帖は、ほかのサイトの中では開けません');
+}
 import * as store from './store.js';
 import * as ndl from './ndl.js';
 import { STATUS, STATUS_ORDER, SOURCES, PRIORITY, GENRES, GENRE_BY_ID, GENRE_GROUPS, GENRE_GROUP_BY_ID, GENRE_GROUP_ORDER, belongsToGenre } from './genres.js';
@@ -1734,6 +1740,7 @@ function renderStats() {
       <div class="row"><label class="ghost file-btn">本を追加で読み込む<input id="merge-file" type="file" accept="application/json,.json"></label></div>
       <form id="import-code-form" class="import-code" autocomplete="off"><label><span class="label">取り込みコードで追加</span><input id="import-code" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="コードを貼り付け"></label><button type="submit" class="ghost small">追加する本を見る</button></form>
       <p class="muted small">更新 ${esc(localTime(store.snapshot().updatedAt))}</p><button type="button" class="link small" data-act="backup-preview">バックアップの内容を確認</button>
+      ${store.rescued() ? `<p class="error">以前の本棚のデータを読めなかったため、元のデータを退避しています（${esc(localTime(store.rescued().at))}）。</p><button type="button" class="ghost small" data-act="export-rescue">退避したデータを書き出す</button>` : ''}
     </details><p class="app-footer">読書手帖 <span>${APP_VERSION}</span><button type="button" class="link" data-act="versions">バージョン履歴</button></p>
   </section>`;
   // 年が多くて横に収まらないときは、選んだ年（すべてなら新しい年）が見える位置へ
@@ -2452,6 +2459,15 @@ store.subscribe((ev) => {
 // ---------------------------------------------------------------- 操作
 const actions = {
   'backup-preview':showBackupPreview,
+  'export-rescue': () => { // 読めなかった本棚のデータ（そのまま）をファイルに。中身は端末の外へは送らない
+    const r = store.rescued();
+    if (!r) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([r.raw], { type: 'application/json' }));
+    a.download = `読書手帖_退避したデータ_${today()}.json`;
+    document.body.append(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  },
   'preference-toggle':el=>{const id=el.dataset.v;preferred.has(id)?preferred.delete(id):preferred.add(id);$('#preference-choices').innerHTML=genreChoices();const next=$('.onboarding-next');if(next)next.textContent=onboardingLabel();$('#preference-choices [data-v="'+id+'"]')?.focus({preventScroll:true});},
   // おすすめは検索タブを開くたびに入れ替わるので、好みを後から変える画面は置かない（v0.15 本人：「好みを変更」はいらない）
   'preferences-save':()=>{store.setFavoriteGenres([...preferred]);recState=null;ui.searchQ='';ui.recShift=(ui.recShift || 0)+1;saveUi();if(location.hash!=='#search')location.hash='#search';else render();},

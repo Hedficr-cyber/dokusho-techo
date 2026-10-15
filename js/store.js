@@ -44,9 +44,19 @@ export function load() {
     // 本棚のシリーズの巻は、点字版の記録しかなくても続巻として残す（シリーズ側で古い巻を除いている）
     state.releases = state.releases.filter((r) => (r.series || isPrintRecord(r)) && !isDigitalEdition(r.title));
   } catch {
-    /* 読めないときは空の本棚で始める */
+    // 読めないときは空の本棚で始める。ただし元のデータは消さずに別の場所へ退避する（セキュリティ点検 2026-10-16：
+    // 壊れた・形の違うデータで始めたとき、次の保存で上書きして本棚を失わないように。同じ退避があれば上書きしない）
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw && !localStorage.getItem(RESCUE_KEY)) localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: new Date().toISOString(), raw }));
+    } catch { /* 容量不足なら退避できない */ }
   }
   return state;
+}
+const RESCUE_KEY = 'dokusho-techo:rescue';
+// 退避したデータ（あれば）。バックアップの画面から書き出せる
+export function rescued() {
+  try { return JSON.parse(localStorage.getItem(RESCUE_KEY) || 'null'); } catch { return null; }
 }
 
 function save(type='change') {
